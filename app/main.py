@@ -13,6 +13,7 @@ from .database import Base, SessionLocal, engine
 from .models import Channel, Download, Job, Video
 from .schemas import ChannelCreate, ChannelOut, DownloadOut, EnqueueDownloadIn, VideoOut
 from .worker import regenerate_manual_feed, sync_channels_from_podsync_config, worker_loop
+from .ytdlp import get_video_metadata
 
 app = FastAPI(title="podsync-companion")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -121,13 +122,47 @@ def list_videos(
             lowered != "[deleted video]",
         )
 
+    null_rank = (Video.published_at.is_(None)).asc()
     if sort.lower() == "desc":
-        query = query.order_by(desc(Video.published_at).nullslast(), desc(Video.id))
+        query = query.order_by(null_rank, desc(Video.published_at), desc(Video.id))
     else:
-        query = query.order_by(asc(Video.published_at).nullslast(), asc(Video.id))
+        query = query.order_by(null_rank, asc(Video.published_at), asc(Video.id))
 
     query = query.limit(limit).offset(offset)
-    return db.execute(query).scalars().all()
+    videos = db.execute(query).scalars().all()
+    updated = False
+    hydrate_budget = 20
+    for video in videos:
+        if hydrate_budget <= 0:
+            break
+        if video.published_at is not None:
+            continue
+        try:
+            metadata = get_video_metadata(video.webpage_url)
+        except Exception:
+            continue
+
+        if metadata.get("published_at") is not None:
+            video.published_at = metadata["published_at"]
+            updated = True
+        if metadata.get("duration_seconds") is not None and video.duration_seconds is None:
+            video.duration_seconds = metadata["duration_seconds"]
+            updated = True
+        if metadata.get("description") and not video.description:
+            video.description = metadata["description"]
+            updated = True
+        if metadata.get("thumbnail_url") and not video.thumbnail_url:
+            video.thumbnail_url = metadata["thumbnail_url"]
+            updated = True
+        if metadata.get("uploader") and not video.uploader:
+            video.uploader = metadata["uploader"]
+            updated = True
+        hydrate_budget -= 1
+
+    if updated:
+        db.commit()
+
+    return videos
 
 
 @app.post("/api/downloads/enqueue")
