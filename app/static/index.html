@@ -25,6 +25,15 @@
         <div class="toolbar">
           <button id="refresh-videos">Refresh list</button>
           <button id="enqueue-selected">Queue selected</button>
+          <label for="page-size">Per page</label>
+          <select id="page-size">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+          </select>
+          <button id="prev-page">Prev</button>
+          <button id="next-page">Next</button>
+          <span id="page-info"></span>
         </div>
         <table>
           <thead>

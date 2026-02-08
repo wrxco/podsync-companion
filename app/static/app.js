@@ -10,6 +10,10 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+let videoOffset = 0;
+let pageSize = 100;
+let lastVideoCount = 0;
+
 function fmtDate(value) {
   if (!value) return "";
   const d = new Date(value);
@@ -41,7 +45,10 @@ async function loadChannels() {
 }
 
 async function loadVideos() {
-  const videos = await api("/api/videos?limit=300");
+  const videos = await api(
+    `/api/videos?limit=${pageSize}&offset=${videoOffset}&sort=asc&include_unavailable=false`
+  );
+  lastVideoCount = videos.length;
   const tbody = document.getElementById("videos");
   tbody.innerHTML = "";
   for (const v of videos) {
@@ -54,6 +61,10 @@ async function loadVideos() {
     `;
     tbody.appendChild(tr);
   }
+  const page = Math.floor(videoOffset / pageSize) + 1;
+  document.getElementById("page-info").textContent = `Page ${page}`;
+  document.getElementById("prev-page").disabled = videoOffset === 0;
+  document.getElementById("next-page").disabled = lastVideoCount < pageSize;
 }
 
 async function loadDownloads() {
@@ -96,6 +107,20 @@ document.getElementById("channel-form").addEventListener("submit", async (e) => 
 
 document.getElementById("refresh-videos").addEventListener("click", () => loadVideos());
 document.getElementById("refresh-downloads").addEventListener("click", () => loadDownloads());
+document.getElementById("page-size").addEventListener("change", async (e) => {
+  pageSize = Number(e.target.value) || 100;
+  videoOffset = 0;
+  await loadVideos();
+});
+document.getElementById("prev-page").addEventListener("click", async () => {
+  videoOffset = Math.max(0, videoOffset - pageSize);
+  await loadVideos();
+});
+document.getElementById("next-page").addEventListener("click", async () => {
+  if (lastVideoCount < pageSize) return;
+  videoOffset += pageSize;
+  await loadVideos();
+});
 document.getElementById("regenerate-feed").addEventListener("click", async () => {
   await api("/api/feed/regenerate", { method: "POST" });
   alert("Manual feed regeneration queued");

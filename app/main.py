@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -100,12 +100,33 @@ def enqueue_index(channel_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/videos", response_model=list[VideoOut])
-def list_videos(channel_id: int | None = None, limit: int = 200, offset: int = 0, db: Session = Depends(get_db)):
+def list_videos(
+    channel_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    sort: str = "asc",
+    include_unavailable: bool = False,
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
     query = select(Video)
     if channel_id is not None:
         query = query.where(Video.channel_id == channel_id)
 
-    query = query.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).limit(limit).offset(offset)
+    if not include_unavailable:
+        lowered = func.lower(Video.title)
+        query = query.where(
+            lowered != "[private video]",
+            lowered != "[deleted video]",
+        )
+
+    if sort.lower() == "desc":
+        query = query.order_by(desc(Video.published_at).nullslast(), desc(Video.id))
+    else:
+        query = query.order_by(asc(Video.published_at).nullslast(), asc(Video.id))
+
+    query = query.limit(limit).offset(offset)
     return db.execute(query).scalars().all()
 
 

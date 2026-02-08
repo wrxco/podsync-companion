@@ -7,6 +7,7 @@
 - manual download queue,
 - automatic `manual.xml` regeneration after each completed manual download,
 - automatic channel import from Podsync's `config.toml`.
+- video browser defaults to oldest-to-newest, paged, and hides private/deleted entries.
 
 Podsync remains the owner of your main Podsync feed XML. Companion publishes a second feed for manual picks.
 

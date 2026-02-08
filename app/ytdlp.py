@@ -13,6 +13,16 @@ def run_command(cmd: list[str]) -> str:
     return completed.stdout
 
 
+def is_unavailable_item(item: dict) -> bool:
+    title = str(item.get("title") or "").strip().lower()
+    availability = str(item.get("availability") or "").strip().lower()
+    if title in {"[private video]", "[deleted video]"}:
+        return True
+    if availability in {"private", "subscriber_only", "premium_only", "needs_auth"}:
+        return True
+    return False
+
+
 def index_channel(url: str, limit: int = 0) -> list[dict]:
     cmd = ["yt-dlp", "--flat-playlist", "--dump-json", "--ignore-errors", url]
     output = run_command(cmd)
@@ -23,6 +33,8 @@ def index_channel(url: str, limit: int = 0) -> list[dict]:
         if not line:
             continue
         item = json.loads(line)
+        if is_unavailable_item(item):
+            continue
 
         raw_date = item.get("upload_date")
         published_at = None
@@ -60,6 +72,28 @@ def index_channel(url: str, limit: int = 0) -> list[dict]:
                 "uploader": item.get("channel") or item.get("uploader") or "",
             }
         )
+
+        if videos and videos[-1]["published_at"] is None:
+            try:
+                metadata = get_video_metadata(webpage_url)
+                videos[-1]["published_at"] = metadata.get("published_at")
+                if metadata.get("description"):
+                    videos[-1]["description"] = metadata["description"]
+                if metadata.get("duration_seconds") is not None:
+                    videos[-1]["duration_seconds"] = metadata["duration_seconds"]
+                if metadata.get("thumbnail_url"):
+                    videos[-1]["thumbnail_url"] = metadata["thumbnail_url"]
+                if metadata.get("uploader"):
+                    videos[-1]["uploader"] = metadata["uploader"]
+                if metadata.get("title"):
+                    title = str(metadata["title"]).strip().lower()
+                    if title not in {"[private video]", "[deleted video]"}:
+                        videos[-1]["title"] = metadata["title"]
+                    else:
+                        videos.pop()
+                        continue
+            except Exception:
+                pass
 
         if limit and len(videos) >= limit:
             break
