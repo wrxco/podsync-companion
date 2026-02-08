@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --fg: #171717;
+  --card: #ffffff;
+  --border: #d7dae0;
+  --accent: #1f6feb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 70%);
+  color: var(--fg);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+main {
+  width: min(1080px, 92vw);
+  margin: 1.5rem auto 2rem;
+}
+
+section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+h1,
+h2 {
+  margin-top: 0;
+}
+
+form,
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+input,
+button {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  padding: 0.45rem;
+  vertical-align: top;
+}
+
+#channels button {
+  margin-right: 0.5rem;
+  margin-bottom: 0.5rem;
+}

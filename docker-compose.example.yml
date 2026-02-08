@@ -1,0 +1,34 @@
+services:
+  podsync:
+    image: mxpv/podsync:latest
+    container_name: podsync
+    restart: unless-stopped
+    ports:
+      - "1337:1337"
+    volumes:
+      - ./podsync/config:/app/config
+      - ./podsync/data:/app/data
+      - ./podsync/media:/app/data/public
+
+  podsync-companion:
+    build:
+      context: ./sidecar
+    container_name: podsync-companion
+    restart: unless-stopped
+    environment:
+      - COMPANION_DB_URL=sqlite:////data/companion.db
+      - COMPANION_SOURCE_DIR=/data/source
+      - COMPANION_MEDIA_DIR=/data/media
+      - COMPANION_POLL_INTERVAL_SECONDS=3
+      - COMPANION_CHANNEL_SCAN_LIMIT=0
+      - COMPANION_PUBLIC_BASE_URL=http://localhost:8080
+      - COMPANION_MEDIA_URL_PATH=/media
+      - COMPANION_MANUAL_FEED_PATH=/feeds/manual.xml
+      - COMPANION_MANUAL_FEED_FILE=/data/manual.xml
+      - COMPANION_MANUAL_FEED_TITLE=Podsync Companion Manual Feed
+      - COMPANION_MANUAL_FEED_DESCRIPTION=Manually selected back-catalog episodes
+      - COMPANION_DOWNLOAD_AUDIO=true
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./sidecar/data:/data

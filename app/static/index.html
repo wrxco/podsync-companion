@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Podsync Companion</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Podsync Companion</h1>
+
+      <section>
+        <h2>Channels</h2>
+        <form id="channel-form">
+          <input id="channel-url" placeholder="YouTube channel or playlist URL" required />
+          <input id="channel-name" placeholder="Optional display name" />
+          <button type="submit">Add channel</button>
+        </form>
+        <div id="channels"></div>
+      </section>
+
+      <section>
+        <h2>Videos</h2>
+        <div class="toolbar">
+          <button id="refresh-videos">Refresh list</button>
+          <button id="enqueue-selected">Queue selected</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Published</th>
+              <th>Title</th>
+              <th>Video ID</th>
+            </tr>
+          </thead>
+          <tbody id="videos"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Manual Feed</h2>
+        <div class="toolbar">
+          <button id="regenerate-feed">Regenerate manual.xml</button>
+          <a id="manual-feed-link" href="#" target="_blank" rel="noreferrer">Open manual feed</a>
+        </div>
+      </section>
+
+      <section>
+        <h2>Downloads</h2>
+        <button id="refresh-downloads">Refresh</button>
+        <table>
+          <thead>
+            <tr>
+              <th>Video ID</th>
+              <th>Status</th>
+              <th>Filename</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="downloads"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
