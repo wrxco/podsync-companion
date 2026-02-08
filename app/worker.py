@@ -1,8 +1,9 @@
+import mimetypes
 import os
 import re
 import threading
-import mimetypes
-from datetime import datetime
+import tomllib
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
@@ -38,6 +39,42 @@ def resolve_dest_path(base_dest_path: Path) -> Path:
         if not candidate.exists() and not os.path.lexists(candidate):
             return candidate
     return parent / f"{stem}_{int(datetime.utcnow().timestamp())}{suffix}"
+
+
+def sync_channels_from_podsync_config() -> int:
+    config_path = Path(settings.podsync_config_path)
+    if not config_path.exists():
+        return 0
+
+    try:
+        raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+
+    feeds = raw.get("feeds")
+    if not isinstance(feeds, dict):
+        return 0
+
+    added = 0
+    with SessionLocal() as session:
+        for feed_id, feed_cfg in feeds.items():
+            if not isinstance(feed_cfg, dict):
+                continue
+
+            url = str(feed_cfg.get("url") or "").strip()
+            if not url:
+                continue
+
+            existing = session.execute(select(Channel).where(Channel.url == url)).scalar_one_or_none()
+            if existing is None:
+                session.add(Channel(url=url, name=str(feed_id)))
+                added += 1
+            elif not existing.name:
+                existing.name = str(feed_id)
+
+        session.commit()
+
+    return added
 
 
 def ensure_video_metadata(video: Video) -> None:
@@ -224,6 +261,8 @@ def process_next_job() -> None:
                 _handle_download(job)
             elif job.job_type == "regenerate_manual_feed":
                 regenerate_manual_feed()
+            elif job.job_type == "sync_podsync_feeds":
+                sync_channels_from_podsync_config()
             else:
                 raise RuntimeError(f"unknown job type {job.job_type}")
 
@@ -256,6 +295,16 @@ def process_next_job() -> None:
 
 
 def worker_loop(stop_event: threading.Event) -> None:
+    next_feed_sync_at = datetime.utcnow()
+
     while not stop_event.is_set():
         process_next_job()
+
+        if settings.podsync_feed_sync_interval_seconds > 0 and datetime.utcnow() >= next_feed_sync_at:
+            try:
+                sync_channels_from_podsync_config()
+            except Exception:
+                pass
+            next_feed_sync_at = datetime.utcnow() + timedelta(seconds=settings.podsync_feed_sync_interval_seconds)
+
         stop_event.wait(settings.poll_interval_seconds)

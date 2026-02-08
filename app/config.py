@@ -17,5 +17,9 @@ class Settings(BaseSettings):
     manual_feed_description: str = "Manually selected back-catalog episodes"
     download_audio: bool = True
 
+    # Read-only mount of Podsync config for automatic channel import.
+    podsync_config_path: str = "/podsync/config.toml"
+    podsync_feed_sync_interval_seconds: int = 300
+
 
 settings = Settings()

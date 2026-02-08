@@ -12,7 +12,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine
 from .models import Channel, Download, Job, Video
 from .schemas import ChannelCreate, ChannelOut, DownloadOut, EnqueueDownloadIn, VideoOut
-from .worker import regenerate_manual_feed, worker_loop
+from .worker import regenerate_manual_feed, sync_channels_from_podsync_config, worker_loop
 
 app = FastAPI(title="podsync-companion")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -36,7 +36,11 @@ def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
     Path(settings.source_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.media_dir).mkdir(parents=True, exist_ok=True)
+
+    # Import channels declared in Podsync config before serving requests.
+    sync_channels_from_podsync_config()
     regenerate_manual_feed()
+
     stop_event.clear()
     worker_thread = threading.Thread(target=worker_loop, args=(stop_event,), daemon=True)
     worker_thread.start()
@@ -76,6 +80,12 @@ def create_channel(payload: ChannelCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(channel)
     return channel
+
+
+@app.post("/api/channels/sync_from_podsync")
+def sync_channels_from_podsync():
+    added = sync_channels_from_podsync_config()
+    return {"ok": True, "added": added}
 
 
 @app.post("/api/channels/{channel_id}/index")

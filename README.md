@@ -5,7 +5,8 @@
 - full channel history indexing (metadata only),
 - a web UI to select back-catalog episodes,
 - manual download queue,
-- automatic `manual.xml` regeneration after each completed manual download.
+- automatic `manual.xml` regeneration after each completed manual download,
+- automatic channel import from Podsync's `config.toml`.
 
 Podsync remains the owner of your main Podsync feed XML. Companion publishes a second feed for manual picks.
 
@@ -24,7 +25,7 @@ docker compose up --build -d
 Then:
 
 1. Open `http://localhost:8080`
-2. Add a YouTube channel/playlist URL
+2. Channels from Podsync config are auto-imported at startup
 3. Click `Index channel`
 4. Select episodes and click `Queue selected`
 
@@ -34,17 +35,27 @@ Each successful manual download updates `manual.xml`.
 
 - Service name: `podsync-companion`
 - Environment prefix: `COMPANION_`
-- Data volume: `./sidecar/data:/data`
+- Data volume: `./companion-data:/data`
+- Mount Podsync config read-only into companion:
+  `./podsync/config.toml:/podsync/config.toml:ro`
+
 ## Important paths inside companion container
 
 - SQLite DB: `/data/companion.db`
 - Download temp/source: `/data/source`
 - Final manual media: `/data/media`
 - Generated feed file: `/data/manual.xml`
+- Podsync config input: `/podsync/config.toml`
+
+## Key sync settings
+
+- `COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml`
+- `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
 
 ## API summary
 
 - `POST /api/channels` add channel `{ url, name? }`
+- `POST /api/channels/sync_from_podsync` import feeds from Podsync config now
 - `POST /api/channels/{id}/index` queue indexing
 - `GET /api/videos?limit=300` list indexed videos
 - `POST /api/downloads/enqueue` queue manual downloads `{ video_ids: [...] }`

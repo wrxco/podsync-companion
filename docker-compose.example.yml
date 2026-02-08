@@ -1,18 +1,18 @@
 services:
   podsync:
-    image: mxpv/podsync:latest
+    image: ghcr.io/wrxco/podsync:filename-template
     container_name: podsync
     restart: unless-stopped
-    ports:
-      - "1337:1337"
+    environment:
+      PODSYNC_CONFIG_PATH: /app/config.toml
     volumes:
-      - ./podsync/config:/app/config
       - ./podsync/data:/app/data
-      - ./podsync/media:/app/data/public
+      - ./podsync/db:/app/db
+      - ./podsync/config.toml:/app/config.toml:ro
 
   podsync-companion:
     build:
-      context: ./sidecar
+      context: .
     container_name: podsync-companion
     restart: unless-stopped
     environment:
@@ -28,7 +28,10 @@ services:
       - COMPANION_MANUAL_FEED_TITLE=Podsync Companion Manual Feed
       - COMPANION_MANUAL_FEED_DESCRIPTION=Manually selected back-catalog episodes
       - COMPANION_DOWNLOAD_AUDIO=true
+      - COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml
+      - COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300
     ports:
       - "8080:8080"
     volumes:
-      - ./sidecar/data:/data
+      - ./companion-data:/data
+      - ./podsync/config.toml:/podsync/config.toml:ro
