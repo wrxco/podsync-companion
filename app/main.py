@@ -236,3 +236,31 @@ def feed_info():
         "merged_feed_url_template": base + f"{settings.merged_feed_path_prefix}/{{channel_id}}.xml",
         "media_url_path": settings.media_url_path,
     }
+
+
+@app.get("/api/feed/merged")
+def merged_feeds(db: Session = Depends(get_db)):
+    base = settings.public_base_url.rstrip("/")
+    merged_dir = Path(settings.merged_feed_dir)
+    if not merged_dir.exists():
+        return []
+
+    available_ids: set[int] = set()
+    for xml_file in merged_dir.glob("*.xml"):
+        try:
+            available_ids.add(int(xml_file.stem))
+        except ValueError:
+            continue
+
+    if not available_ids:
+        return []
+
+    channels = db.execute(select(Channel).where(Channel.id.in_(available_ids)).order_by(Channel.id.asc())).scalars().all()
+    return [
+        {
+            "channel_id": ch.id,
+            "channel_name": ch.name or ch.url,
+            "url": f"{base}{settings.merged_feed_path_prefix}/{ch.id}.xml",
+        }
+        for ch in channels
+    ]

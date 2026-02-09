@@ -22,6 +22,7 @@ from .ytdlp import download_video, get_video_metadata, index_channel
 @dataclass
 class FeedItem:
     guid: str
+    dedupe_key: str
     pub_date: datetime
     xml: str
     description_len: int
@@ -73,6 +74,26 @@ def _find_child_text(item: ET.Element, local_name: str) -> str:
     for child in item:
         if _local_name(child.tag) == local_name:
             return child.text or ""
+    return ""
+
+
+def _extract_video_id(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+
+    match = re.search(r"[?&]v=([A-Za-z0-9_-]{6,20})", text)
+    if match:
+        return match.group(1)
+
+    match = re.search(r"youtu\.be/([A-Za-z0-9_-]{6,20})", text)
+    if match:
+        return match.group(1)
+
+    match = re.fullmatch(r"[A-Za-z0-9_-]{6,20}", text)
+    if match:
+        return text
+
     return ""
 
 
@@ -155,7 +176,16 @@ def _load_podsync_feeds() -> list[PodsyncFeed]:
             pub_dt = _parse_pub_date(_find_child_text(item, "pubDate")) or datetime.utcnow()
             desc_text = _find_child_text(item, "description")
             xml = "    " + ET.tostring(item, encoding="unicode").replace("\n", "\n    ")
-            items.append(FeedItem(guid=guid, pub_date=pub_dt, xml=xml, description_len=len(desc_text)))
+            dedupe_key = _extract_video_id(guid) or _extract_video_id(_find_child_text(item, "link")) or guid
+            items.append(
+                FeedItem(
+                    guid=guid,
+                    dedupe_key=dedupe_key,
+                    pub_date=pub_dt,
+                    xml=xml,
+                    description_len=len(desc_text),
+                )
+            )
 
         feeds.append(PodsyncFeed(feed_id=feed_id, source_url=source_url, title=title, description=description, items=items))
 
@@ -286,7 +316,15 @@ def _manual_feed_items(rows: list[tuple[Download, Video]]) -> list[FeedItem]:
                 "    </item>",
             ]
         )
-        items.append(FeedItem(guid=video.video_id, pub_date=pub_dt, xml=xml, description_len=len(description_raw)))
+        items.append(
+            FeedItem(
+                guid=video.video_id,
+                dedupe_key=video.video_id,
+                pub_date=pub_dt,
+                xml=xml,
+                description_len=len(description_raw),
+            )
+        )
 
     return items
 
@@ -318,6 +356,7 @@ def regenerate_merged_feeds() -> None:
 
     merged_dir = Path(settings.merged_feed_dir)
     merged_dir.mkdir(parents=True, exist_ok=True)
+    generated_channel_ids: set[int] = set()
 
     for channel in channels:
         podsync_feed = by_source_url.get(_normalize_url(channel.url))
@@ -326,17 +365,19 @@ def regenerate_merged_feeds() -> None:
 
         podsync_items = podsync_feed.items if podsync_feed else []
         manual_items = _manual_feed_items(manual_by_channel.get(channel.id, []))
+        if not podsync_items and not manual_items:
+            continue
 
         by_guid: dict[str, FeedItem] = {}
         for item in podsync_items + manual_items:
-            existing = by_guid.get(item.guid)
+            existing = by_guid.get(item.dedupe_key)
             if existing is None:
-                by_guid[item.guid] = item
+                by_guid[item.dedupe_key] = item
                 continue
             if item.description_len > existing.description_len:
-                by_guid[item.guid] = item
+                by_guid[item.dedupe_key] = item
             elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
-                by_guid[item.guid] = item
+                by_guid[item.dedupe_key] = item
 
         merged_items = sorted(by_guid.values(), key=lambda it: it.pub_date, reverse=True)
         link = settings.public_base_url.rstrip("/") + f"{settings.merged_feed_path_prefix}/{channel.id}.xml"
@@ -355,6 +396,15 @@ def regenerate_merged_feeds() -> None:
             link,
             merged_items,
         )
+        generated_channel_ids.add(channel.id)
+
+    for old_file in merged_dir.glob("*.xml"):
+        try:
+            channel_id = int(old_file.stem)
+        except ValueError:
+            continue
+        if channel_id not in generated_channel_ids:
+            old_file.unlink(missing_ok=True)
 
 
 def regenerate_all_feeds() -> None:

@@ -111,10 +111,32 @@ async function loadFeedInfo() {
   const manual = document.getElementById("manual-feed-link");
   manual.href = info.manual_feed_url;
   manual.textContent = info.manual_feed_url;
+  const mergedFeeds = await api("/api/feed/merged");
+  const mergedList = document.getElementById("merged-feed-list");
+  mergedList.innerHTML = "";
 
-  const mergedTemplate = document.getElementById("merged-feed-template-link");
-  mergedTemplate.href = info.merged_feed_url_template;
-  mergedTemplate.textContent = info.merged_feed_url_template;
+  if (!mergedFeeds.length) {
+    mergedList.textContent = "No merged channel feeds generated yet.";
+    return;
+  }
+
+  const heading = document.createElement("div");
+  heading.textContent = "Merged channel feeds";
+  mergedList.appendChild(heading);
+
+  for (const feed of mergedFeeds) {
+    const row = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `${feed.channel_name}: `;
+    const link = document.createElement("a");
+    link.href = feed.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = feed.url;
+    row.appendChild(label);
+    row.appendChild(link);
+    mergedList.appendChild(row);
+  }
 }
 
 document.getElementById("channel-form").addEventListener("submit", async (e) => {
@@ -175,6 +197,8 @@ document.getElementById("next-page").addEventListener("click", async () => {
 document.getElementById("regenerate-feed").addEventListener("click", async () => {
   await api("/api/feed/regenerate", { method: "POST" });
   alert("Feed regeneration queued");
+  await loadFeedInfo();
+  await loadChannels();
 });
 
 document.getElementById("enqueue-selected").addEventListener("click", async () => {
