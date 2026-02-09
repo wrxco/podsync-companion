@@ -103,8 +103,40 @@ def regenerate_manual_feed() -> None:
             select(Download, Video)
             .join(Video, Video.video_id == Download.video_id)
             .where(Download.status == "done", Download.filename.is_not(None))
-            .order_by(Video.published_at.desc().nullslast(), Download.updated_at.desc())
         ).all()
+
+        # Best effort backfill so RSS ordering uses actual release date, not download time.
+        changed = False
+        for _download, video in rows:
+            if video.published_at is not None:
+                continue
+            try:
+                metadata = get_video_metadata(video.webpage_url)
+            except Exception:
+                continue
+            if metadata.get("published_at") is not None:
+                video.published_at = metadata["published_at"]
+                changed = True
+            if metadata.get("duration_seconds") is not None and video.duration_seconds is None:
+                video.duration_seconds = metadata["duration_seconds"]
+                changed = True
+            if metadata.get("description") and not video.description:
+                video.description = metadata["description"]
+                changed = True
+            if metadata.get("thumbnail_url") and not video.thumbnail_url:
+                video.thumbnail_url = metadata["thumbnail_url"]
+                changed = True
+            if metadata.get("uploader") and not video.uploader:
+                video.uploader = metadata["uploader"]
+                changed = True
+        if changed:
+            session.commit()
+
+    def effective_pub(row: tuple[Download, Video]) -> datetime:
+        download, video = row
+        return video.published_at or download.updated_at or now
+
+    rows.sort(key=effective_pub, reverse=True)
 
     items = []
     for download, video in rows:
