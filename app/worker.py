@@ -24,6 +24,7 @@ class FeedItem:
     guid: str
     dedupe_key: str
     pub_date: datetime
+    episode_number: int | None
     xml: str
     description_len: int
 
@@ -95,6 +96,21 @@ def _extract_video_id(value: str) -> str:
         return text
 
     return ""
+
+
+def _extract_episode_number(value: str) -> int | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+
+    match = re.search(r"(?:episode|edition)\s*#?\s*(\d{1,5})\b", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def _parse_pub_date(value: str) -> datetime | None:
@@ -182,6 +198,7 @@ def _load_podsync_feeds() -> list[PodsyncFeed]:
                     guid=guid,
                     dedupe_key=dedupe_key,
                     pub_date=pub_dt,
+                    episode_number=_extract_episode_number(_find_child_text(item, "title")),
                     xml=xml,
                     description_len=len(desc_text),
                 )
@@ -321,6 +338,7 @@ def _manual_feed_items(rows: list[tuple[Download, Video]]) -> list[FeedItem]:
                 guid=video.video_id,
                 dedupe_key=video.video_id,
                 pub_date=pub_dt,
+                episode_number=_extract_episode_number(video.title),
                 xml=xml,
                 description_len=len(description_raw),
             )
@@ -379,7 +397,12 @@ def regenerate_merged_feeds() -> None:
             elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
                 by_guid[item.dedupe_key] = item
 
-        merged_items = sorted(by_guid.values(), key=lambda it: it.pub_date, reverse=True)
+        def _sort_key(item: FeedItem) -> tuple[int, int, datetime, str]:
+            has_episode = 1 if item.episode_number is not None else 0
+            episode_num = item.episode_number or -1
+            return (has_episode, episode_num, item.pub_date, item.guid)
+
+        merged_items = sorted(by_guid.values(), key=_sort_key, reverse=True)
         link = settings.public_base_url.rstrip("/") + f"{settings.merged_feed_path_prefix}/{channel.id}.xml"
         if podsync_feed:
             title = podsync_feed.title
