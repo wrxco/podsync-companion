@@ -87,9 +87,12 @@ async function loadDownloads() {
 
 async function loadFeedInfo() {
   const info = await api("/api/feed");
-  const link = document.getElementById("manual-feed-link");
-  link.href = info.manual_feed_url;
-  link.textContent = info.manual_feed_url;
+  const manual = document.getElementById("manual-feed-link");
+  manual.href = info.manual_feed_url;
+  manual.textContent = info.manual_feed_url;
+  const merged = document.getElementById("merged-feed-link");
+  merged.href = info.merged_feed_url;
+  merged.textContent = info.merged_feed_url;
 }
 
 document.getElementById("channel-form").addEventListener("submit", async (e) => {

@@ -12,7 +12,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine
 from .models import Channel, Download, Job, Video
 from .schemas import ChannelCreate, ChannelOut, DownloadOut, EnqueueDownloadIn, VideoOut
-from .worker import regenerate_manual_feed, sync_channels_from_podsync_config, worker_loop
+from .worker import regenerate_all_feeds, sync_channels_from_podsync_config, worker_loop
 from .ytdlp import get_video_metadata
 
 app = FastAPI(title="podsync-companion")
@@ -40,7 +40,7 @@ def on_startup() -> None:
 
     # Import channels declared in Podsync config before serving requests.
     sync_channels_from_podsync_config()
-    regenerate_manual_feed()
+    regenerate_all_feeds()
 
     stop_event.clear()
     worker_thread = threading.Thread(target=worker_loop, args=(stop_event,), daemon=True)
@@ -62,6 +62,14 @@ def manual_feed():
     feed_file = Path(settings.manual_feed_file)
     if not feed_file.exists():
         raise HTTPException(status_code=404, detail="manual feed has not been generated yet")
+    return FileResponse(feed_file, media_type="application/rss+xml")
+
+
+@app.get(settings.merged_feed_path)
+def merged_feed():
+    feed_file = Path(settings.merged_feed_file)
+    if not feed_file.exists():
+        raise HTTPException(status_code=404, detail="merged feed has not been generated yet")
     return FileResponse(feed_file, media_type="application/rss+xml")
 
 
@@ -220,6 +228,8 @@ def regenerate_feed(db: Session = Depends(get_db)):
 def feed_info():
     return {
         "manual_feed_url": settings.public_base_url.rstrip("/") + settings.manual_feed_path,
+        "merged_feed_url": settings.public_base_url.rstrip("/") + settings.merged_feed_path,
         "manual_feed_path": settings.manual_feed_path,
+        "merged_feed_path": settings.merged_feed_path,
         "media_url_path": settings.media_url_path,
     }

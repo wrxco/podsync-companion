@@ -15,10 +15,15 @@ class Settings(BaseSettings):
     manual_feed_file: str = "/data/manual.xml"
     manual_feed_title: str = "Podsync Companion Manual Feed"
     manual_feed_description: str = "Manually selected back-catalog episodes"
+    merged_feed_path: str = "/feeds/merged.xml"
+    merged_feed_file: str = "/data/merged.xml"
+    merged_feed_title: str = "Podsync Companion Merged Feed"
+    merged_feed_description: str = "Podsync feed items plus companion manual items"
     download_audio: bool = True
 
     # Read-only mount of Podsync config for automatic channel import.
     podsync_config_path: str = "/podsync/config.toml"
+    podsync_data_dir: str = "/podsync/data"
     podsync_feed_sync_interval_seconds: int = 300
 
 

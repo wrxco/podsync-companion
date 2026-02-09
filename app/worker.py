@@ -3,7 +3,10 @@ import os
 import re
 import threading
 import tomllib
-from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
@@ -14,6 +17,14 @@ from .config import settings
 from .database import SessionLocal
 from .models import Channel, Download, Job, Video
 from .ytdlp import download_video, get_video_metadata, index_channel
+
+
+@dataclass
+class FeedItem:
+    guid: str
+    pub_date: datetime
+    xml: str
+    description_len: int
 
 
 def slugify_title(value: str) -> str:
@@ -39,6 +50,37 @@ def resolve_dest_path(base_dest_path: Path) -> Path:
         if not candidate.exists() and not os.path.lexists(candidate):
             return candidate
     return parent / f"{stem}_{int(datetime.utcnow().timestamp())}{suffix}"
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _find_child_text(item: ET.Element, local_name: str) -> str:
+    for child in item:
+        if _local_name(child.tag) == local_name:
+            return child.text or ""
+    return ""
+
+
+def _parse_pub_date(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _format_pub_date(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return format_datetime(dt)
 
 
 def sync_channels_from_podsync_config() -> int:
@@ -93,11 +135,8 @@ def ensure_video_metadata(video: Video) -> None:
         video.uploader = metadata["uploader"]
 
 
-def regenerate_manual_feed() -> None:
-    base_url = settings.public_base_url.rstrip("/")
-    media_path_prefix = settings.media_url_path.strip("/")
+def _load_manual_rows() -> list[tuple[Download, Video]]:
     now = datetime.utcnow()
-
     with SessionLocal() as session:
         rows = session.execute(
             select(Download, Video)
@@ -105,7 +144,6 @@ def regenerate_manual_feed() -> None:
             .where(Download.status == "done", Download.filename.is_not(None))
         ).all()
 
-        # Best effort backfill so RSS ordering uses actual release date, not download time.
         changed = False
         for _download, video in rows:
             if video.published_at is not None:
@@ -132,17 +170,22 @@ def regenerate_manual_feed() -> None:
         if changed:
             session.commit()
 
-    def effective_pub(row: tuple[Download, Video]) -> datetime:
-        download, video = row
-        return video.published_at or download.updated_at or now
+    rows.sort(key=lambda row: row[1].published_at or row[0].updated_at or now, reverse=True)
+    return rows
 
-    rows.sort(key=effective_pub, reverse=True)
 
-    items = []
+def _manual_feed_items(rows: list[tuple[Download, Video]]) -> list[FeedItem]:
+    base_url = settings.public_base_url.rstrip("/")
+    media_path_prefix = settings.media_url_path.strip("/")
+    now = datetime.utcnow()
+    items: list[FeedItem] = []
+
     for download, video in rows:
-        pub = (video.published_at or download.updated_at or now).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        pub_dt = video.published_at or download.updated_at or now
+        pub = _format_pub_date(pub_dt)
         title = escape(video.title or download.filename or video.video_id)
-        description = escape(video.description or video.webpage_url or "")
+        description_raw = video.description or video.webpage_url or ""
+        description = escape(description_raw)
         guid = escape(video.video_id)
         enclosure_url = f"{base_url}/{media_path_prefix}/{quote(download.filename)}"
         mime_type = mimetypes.guess_type(download.filename or "")[0] or "application/octet-stream"
@@ -153,40 +196,118 @@ def regenerate_manual_feed() -> None:
             except OSError:
                 size = 0
 
-        items.append(
-            "\n".join(
-                [
-                    "    <item>",
-                    f"      <title>{title}</title>",
-                    f"      <description>{description}</description>",
-                    f"      <guid isPermaLink=\"false\">{guid}</guid>",
-                    f"      <pubDate>{pub}</pubDate>",
-                    f"      <link>{escape(video.webpage_url or '')}</link>",
-                    f"      <enclosure url=\"{escape(enclosure_url)}\" length=\"{size}\" type=\"{escape(mime_type)}\" />",
-                    "    </item>",
-                ]
-            )
+        xml = "\n".join(
+            [
+                "    <item>",
+                f"      <title>{title}</title>",
+                f"      <description>{description}</description>",
+                f"      <guid isPermaLink=\"false\">{guid}</guid>",
+                f"      <pubDate>{pub}</pubDate>",
+                f"      <link>{escape(video.webpage_url or '')}</link>",
+                f"      <enclosure url=\"{escape(enclosure_url)}\" length=\"{size}\" type=\"{escape(mime_type)}\" />",
+                "    </item>",
+            ]
         )
+        items.append(FeedItem(guid=video.video_id, pub_date=pub_dt, xml=xml, description_len=len(description_raw)))
 
-    last_build = now.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    return items
+
+
+def _podsync_feed_items() -> list[FeedItem]:
+    data_root = Path(settings.podsync_data_dir)
+    if not data_root.exists():
+        return []
+
+    items: list[FeedItem] = []
+    for xml_file in sorted(data_root.rglob("*.xml")):
+        try:
+            root = ET.parse(xml_file).getroot()
+        except Exception:
+            continue
+
+        for item in root.iter():
+            if _local_name(item.tag) != "item":
+                continue
+
+            guid = _find_child_text(item, "guid").strip() or _find_child_text(item, "link").strip()
+            if not guid:
+                continue
+
+            pub_text = _find_child_text(item, "pubDate")
+            pub_dt = _parse_pub_date(pub_text) or datetime.utcnow()
+            desc_text = _find_child_text(item, "description")
+
+            xml = ET.tostring(item, encoding="unicode")
+            # Normalize indentation a bit for readability
+            xml = "    " + xml.replace("\n", "\n    ")
+            items.append(FeedItem(guid=guid, pub_date=pub_dt, xml=xml, description_len=len(desc_text)))
+
+    return items
+
+
+def _write_feed_file(path: str, title: str, description: str, link: str, items: list[FeedItem]) -> None:
+    now = datetime.utcnow()
     xml = "\n".join(
         [
             '<?xml version="1.0" encoding="UTF-8"?>',
-            '<rss version="2.0">',
+            '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">',
             "  <channel>",
-            f"    <title>{escape(settings.manual_feed_title)}</title>",
-            f"    <description>{escape(settings.manual_feed_description)}</description>",
-            f"    <link>{escape(base_url + settings.manual_feed_path)}</link>",
-            f"    <lastBuildDate>{last_build}</lastBuildDate>",
-            *items,
+            f"    <title>{escape(title)}</title>",
+            f"    <description>{escape(description)}</description>",
+            f"    <link>{escape(link)}</link>",
+            f"    <lastBuildDate>{_format_pub_date(now)}</lastBuildDate>",
+            *[item.xml for item in items],
             "  </channel>",
             "</rss>",
         ]
     )
 
-    feed_file = Path(settings.manual_feed_file)
+    feed_file = Path(path)
     feed_file.parent.mkdir(parents=True, exist_ok=True)
     feed_file.write_text(xml + "\n", encoding="utf-8")
+
+
+def regenerate_manual_feed() -> None:
+    rows = _load_manual_rows()
+    items = _manual_feed_items(rows)
+    _write_feed_file(
+        settings.manual_feed_file,
+        settings.manual_feed_title,
+        settings.manual_feed_description,
+        settings.public_base_url.rstrip("/") + settings.manual_feed_path,
+        items,
+    )
+
+
+def regenerate_merged_feed() -> None:
+    manual_items = _manual_feed_items(_load_manual_rows())
+    podsync_items = _podsync_feed_items()
+
+    by_guid: dict[str, FeedItem] = {}
+    for item in podsync_items + manual_items:
+        existing = by_guid.get(item.guid)
+        if existing is None:
+            by_guid[item.guid] = item
+            continue
+        # Prefer richer metadata, then newer publish date.
+        if item.description_len > existing.description_len:
+            by_guid[item.guid] = item
+        elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
+            by_guid[item.guid] = item
+
+    merged = sorted(by_guid.values(), key=lambda it: it.pub_date, reverse=True)
+    _write_feed_file(
+        settings.merged_feed_file,
+        settings.merged_feed_title,
+        settings.merged_feed_description,
+        settings.public_base_url.rstrip("/") + settings.merged_feed_path,
+        merged,
+    )
+
+
+def regenerate_all_feeds() -> None:
+    regenerate_manual_feed()
+    regenerate_merged_feed()
 
 
 def _handle_index(job: Job) -> None:
@@ -267,7 +388,7 @@ def _handle_download(job: Job) -> None:
         record.updated_at = datetime.utcnow()
         session.commit()
 
-    regenerate_manual_feed()
+    regenerate_all_feeds()
 
 
 def process_next_job() -> None:
@@ -292,7 +413,7 @@ def process_next_job() -> None:
             elif job.job_type == "download_video":
                 _handle_download(job)
             elif job.job_type == "regenerate_manual_feed":
-                regenerate_manual_feed()
+                regenerate_all_feeds()
             elif job.job_type == "sync_podsync_feeds":
                 sync_channels_from_podsync_config()
             else:
@@ -335,6 +456,7 @@ def worker_loop(stop_event: threading.Event) -> None:
         if settings.podsync_feed_sync_interval_seconds > 0 and datetime.utcnow() >= next_feed_sync_at:
             try:
                 sync_channels_from_podsync_config()
+                regenerate_merged_feed()
             except Exception:
                 pass
             next_feed_sync_at = datetime.utcnow() + timedelta(seconds=settings.podsync_feed_sync_interval_seconds)

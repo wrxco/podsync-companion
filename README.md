@@ -15,6 +15,7 @@ Podsync remains the owner of your main Podsync feed XML. Companion publishes a s
 
 - Web UI: `http://localhost:8080`
 - Manual RSS feed: `http://localhost:8080/feeds/manual.xml`
+- Merged RSS feed: `http://localhost:8080/feeds/merged.xml`
 - Manual media files: `http://localhost:8080/media/<filename>`
 
 ## Run
@@ -39,6 +40,8 @@ Each successful manual download updates `manual.xml`.
 - Data volume: `./companion-data:/data`
 - Mount Podsync config read-only into companion:
   `./podsync/config.toml:/podsync/config.toml:ro`
+- Mount Podsync data read-only into companion for merged feed import:
+  `./podsync/data:/podsync/data:ro`
 
 ## Important paths inside companion container
 
@@ -46,11 +49,14 @@ Each successful manual download updates `manual.xml`.
 - Download temp/source: `/data/source`
 - Final manual media: `/data/media`
 - Generated feed file: `/data/manual.xml`
+- Generated merged feed file: `/data/merged.xml`
 - Podsync config input: `/podsync/config.toml`
+- Podsync XML input directory: `/podsync/data`
 
 ## Key sync settings
 
 - `COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml`
+- `COMPANION_PODSYNC_DATA_DIR=/podsync/data`
 - `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
 
 ## API summary
@@ -62,4 +68,5 @@ Each successful manual download updates `manual.xml`.
 - `POST /api/downloads/enqueue` queue manual downloads `{ video_ids: [...] }`
 - `GET /api/downloads` list manual download statuses
 - `POST /api/feed/regenerate` regenerate `manual.xml`
+- `POST /api/feed/regenerate` regenerate `manual.xml` and `merged.xml`
 - `GET /api/feed` feed URL metadata
