@@ -13,6 +13,7 @@ async function api(path, options = {}) {
 let videoOffset = 0;
 let pageSize = 100;
 let lastVideoCount = 0;
+let channelsCache = [];
 
 function fmtDate(value) {
   if (!value) return "";
@@ -23,6 +24,7 @@ function fmtDate(value) {
 
 async function loadChannels() {
   const channels = await api("/api/channels");
+  channelsCache = channels;
   const root = document.getElementById("channels");
   root.innerHTML = "";
   for (const ch of channels) {
@@ -102,6 +104,30 @@ document.getElementById("channel-form").addEventListener("submit", async (e) => 
   });
   document.getElementById("channel-url").value = "";
   document.getElementById("channel-name").value = "";
+  await loadChannels();
+});
+
+document.getElementById("sync-from-podsync").addEventListener("click", async () => {
+  const result = await api("/api/channels/sync_from_podsync", { method: "POST" });
+  alert(`Imported ${result.added} channel(s) from Podsync config`);
+  await loadChannels();
+});
+
+document.getElementById("index-all-channels").addEventListener("click", async () => {
+  if (!channelsCache.length) {
+    await loadChannels();
+  }
+  if (!channelsCache.length) {
+    alert("No channels available to index");
+    return;
+  }
+
+  let queued = 0;
+  for (const ch of channelsCache) {
+    await api(`/api/channels/${ch.id}/index`, { method: "POST" });
+    queued += 1;
+  }
+  alert(`Queued index jobs for ${queued} channel(s)`);
   await loadChannels();
 });
 
