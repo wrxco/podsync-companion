@@ -397,10 +397,12 @@ def regenerate_merged_feeds() -> None:
             elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
                 by_guid[item.dedupe_key] = item
 
-        def _sort_key(item: FeedItem) -> tuple[int, int, datetime, str]:
+        def _sort_key(item: FeedItem) -> tuple[datetime, int, int, str]:
+            # Keep chronological correctness for podcast clients (pubDate is primary),
+            # then use episode number as a stable tie-breaker when dates match.
             has_episode = 1 if item.episode_number is not None else 0
             episode_num = item.episode_number or -1
-            return (has_episode, episode_num, item.pub_date, item.guid)
+            return (item.pub_date, has_episode, episode_num, item.guid)
 
         merged_items = sorted(by_guid.values(), key=_sort_key, reverse=True)
         link = settings.public_base_url.rstrip("/") + f"{settings.merged_feed_path_prefix}/{channel.id}.xml"
