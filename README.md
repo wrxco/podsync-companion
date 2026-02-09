@@ -6,16 +6,16 @@
 - a web UI to select back-catalog episodes,
 - manual download queue,
 - automatic `manual.xml` regeneration after each completed manual download,
-- automatic channel import from Podsync's `config.toml`.
-- video browser defaults to oldest-to-newest, paged, and hides private/deleted entries.
+- automatic channel import from Podsync's `config.toml`,
+- per-channel merged feeds (Podsync feed + companion manual downloads for that channel).
 
-Podsync remains the owner of your main Podsync feed XML. Companion publishes a second feed for manual picks.
+Podsync remains the owner of your main Podsync feed XML.
 
 ## What it serves
 
 - Web UI: `http://localhost:8080`
 - Manual RSS feed: `http://localhost:8080/feeds/manual.xml`
-- Merged RSS feed: `http://localhost:8080/feeds/merged.xml`
+- Per-channel merged RSS feed: `http://localhost:8080/feeds/merged/<channel_id>.xml`
 - Manual media files: `http://localhost:8080/media/<filename>`
 
 ## Run
@@ -31,7 +31,7 @@ Then:
 3. Click `Index channel`
 4. Select episodes and click `Queue selected`
 
-Each successful manual download updates `manual.xml`.
+Each successful manual download updates `manual.xml` and the merged feed for that channel.
 
 ## Compose notes
 
@@ -48,8 +48,8 @@ Each successful manual download updates `manual.xml`.
 - SQLite DB: `/data/companion.db`
 - Download temp/source: `/data/source`
 - Final manual media: `/data/media`
-- Generated feed file: `/data/manual.xml`
-- Generated merged feed file: `/data/merged.xml`
+- Generated manual feed file: `/data/manual.xml`
+- Generated per-channel merged feed files: `/data/merged/<channel_id>.xml`
 - Podsync config input: `/podsync/config.toml`
 - Podsync XML input directory: `/podsync/data`
 
@@ -59,6 +59,12 @@ Each successful manual download updates `manual.xml`.
 - `COMPANION_PODSYNC_DATA_DIR=/podsync/data`
 - `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
 
+## Merged feed settings
+
+- `COMPANION_MERGED_FEED_PATH_PREFIX=/feeds/merged`
+- `COMPANION_MERGED_FEED_DIR=/data/merged`
+- `COMPANION_MERGED_FEED_TITLE_SUFFIX=Merged Feed`
+
 ## API summary
 
 - `POST /api/channels` add channel `{ url, name? }`
@@ -67,6 +73,5 @@ Each successful manual download updates `manual.xml`.
 - `GET /api/videos?limit=300` list indexed videos
 - `POST /api/downloads/enqueue` queue manual downloads `{ video_ids: [...] }`
 - `GET /api/downloads` list manual download statuses
-- `POST /api/feed/regenerate` regenerate `manual.xml`
-- `POST /api/feed/regenerate` regenerate `manual.xml` and `merged.xml`
-- `GET /api/feed` feed URL metadata
+- `POST /api/feed/regenerate` regenerate manual + per-channel merged feeds
+- `GET /api/feed` feed URL metadata (manual URL + merged URL template)

@@ -14,12 +14,20 @@ let videoOffset = 0;
 let pageSize = 100;
 let lastVideoCount = 0;
 let channelsCache = [];
+let feedInfoCache = null;
 
 function fmtDate(value) {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
+}
+
+function mergedUrlForChannel(channelId) {
+  if (!feedInfoCache || !feedInfoCache.merged_feed_url_template) {
+    return "";
+  }
+  return feedInfoCache.merged_feed_url_template.replace("{channel_id}", String(channelId));
 }
 
 async function loadChannels() {
@@ -42,6 +50,18 @@ async function loadChannels() {
 
     wrap.appendChild(btn);
     wrap.appendChild(text);
+
+    const mergedUrl = mergedUrlForChannel(ch.id);
+    if (mergedUrl) {
+      const link = document.createElement("a");
+      link.href = mergedUrl;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = "Merged feed";
+      wrap.appendChild(document.createTextNode(" "));
+      wrap.appendChild(link);
+    }
+
     root.appendChild(wrap);
   }
 }
@@ -87,12 +107,14 @@ async function loadDownloads() {
 
 async function loadFeedInfo() {
   const info = await api("/api/feed");
+  feedInfoCache = info;
   const manual = document.getElementById("manual-feed-link");
   manual.href = info.manual_feed_url;
   manual.textContent = info.manual_feed_url;
-  const merged = document.getElementById("merged-feed-link");
-  merged.href = info.merged_feed_url;
-  merged.textContent = info.merged_feed_url;
+
+  const mergedTemplate = document.getElementById("merged-feed-template-link");
+  mergedTemplate.href = info.merged_feed_url_template;
+  mergedTemplate.textContent = info.merged_feed_url_template;
 }
 
 document.getElementById("channel-form").addEventListener("submit", async (e) => {
@@ -152,7 +174,7 @@ document.getElementById("next-page").addEventListener("click", async () => {
 });
 document.getElementById("regenerate-feed").addEventListener("click", async () => {
   await api("/api/feed/regenerate", { method: "POST" });
-  alert("Manual feed regeneration queued");
+  alert("Feed regeneration queued");
 });
 
 document.getElementById("enqueue-selected").addEventListener("click", async () => {

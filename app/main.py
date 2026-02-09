@@ -65,11 +65,11 @@ def manual_feed():
     return FileResponse(feed_file, media_type="application/rss+xml")
 
 
-@app.get(settings.merged_feed_path)
-def merged_feed():
-    feed_file = Path(settings.merged_feed_file)
+@app.get(f"{settings.merged_feed_path_prefix}/{{channel_id}}.xml")
+def merged_feed_for_channel(channel_id: int):
+    feed_file = Path(settings.merged_feed_dir) / f"{channel_id}.xml"
     if not feed_file.exists():
-        raise HTTPException(status_code=404, detail="merged feed has not been generated yet")
+        raise HTTPException(status_code=404, detail="merged feed for this channel has not been generated yet")
     return FileResponse(feed_file, media_type="application/rss+xml")
 
 
@@ -88,12 +88,14 @@ def create_channel(payload: ChannelCreate, db: Session = Depends(get_db)):
     db.add(channel)
     db.commit()
     db.refresh(channel)
+    regenerate_all_feeds()
     return channel
 
 
 @app.post("/api/channels/sync_from_podsync")
 def sync_channels_from_podsync():
     added = sync_channels_from_podsync_config()
+    regenerate_all_feeds()
     return {"ok": True, "added": added}
 
 
@@ -226,10 +228,11 @@ def regenerate_feed(db: Session = Depends(get_db)):
 
 @app.get("/api/feed")
 def feed_info():
+    base = settings.public_base_url.rstrip("/")
     return {
-        "manual_feed_url": settings.public_base_url.rstrip("/") + settings.manual_feed_path,
-        "merged_feed_url": settings.public_base_url.rstrip("/") + settings.merged_feed_path,
+        "manual_feed_url": base + settings.manual_feed_path,
         "manual_feed_path": settings.manual_feed_path,
-        "merged_feed_path": settings.merged_feed_path,
+        "merged_feed_path_prefix": settings.merged_feed_path_prefix,
+        "merged_feed_url_template": base + f"{settings.merged_feed_path_prefix}/{{channel_id}}.xml",
         "media_url_path": settings.media_url_path,
     }

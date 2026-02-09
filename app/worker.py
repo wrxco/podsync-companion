@@ -27,6 +27,15 @@ class FeedItem:
     description_len: int
 
 
+@dataclass
+class PodsyncFeed:
+    feed_id: str
+    source_url: str
+    title: str
+    description: str
+    items: list[FeedItem]
+
+
 def slugify_title(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "", value).strip()
     cleaned = re.sub(r"\s+", "_", cleaned)
@@ -56,6 +65,10 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _normalize_url(url: str) -> str:
+    return (url or "").strip().rstrip("/")
+
+
 def _find_child_text(item: ET.Element, local_name: str) -> str:
     for child in item:
         if _local_name(child.tag) == local_name:
@@ -83,6 +96,72 @@ def _format_pub_date(dt: datetime) -> str:
     return format_datetime(dt)
 
 
+def _write_feed_file(path: str, title: str, description: str, link: str, items: list[FeedItem]) -> None:
+    now = datetime.utcnow()
+    xml = "\n".join(
+        [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">',
+            "  <channel>",
+            f"    <title>{escape(title)}</title>",
+            f"    <description>{escape(description)}</description>",
+            f"    <link>{escape(link)}</link>",
+            f"    <lastBuildDate>{_format_pub_date(now)}</lastBuildDate>",
+            *[item.xml for item in items],
+            "  </channel>",
+            "</rss>",
+        ]
+    )
+
+    feed_file = Path(path)
+    feed_file.parent.mkdir(parents=True, exist_ok=True)
+    feed_file.write_text(xml + "\n", encoding="utf-8")
+
+
+def _load_podsync_feeds() -> list[PodsyncFeed]:
+    data_root = Path(settings.podsync_data_dir)
+    if not data_root.exists():
+        return []
+
+    feeds: list[PodsyncFeed] = []
+    for xml_file in sorted(data_root.rglob("*.xml")):
+        try:
+            root = ET.parse(xml_file).getroot()
+        except Exception:
+            continue
+
+        channel = None
+        for node in root.iter():
+            if _local_name(node.tag) == "channel":
+                channel = node
+                break
+        if channel is None:
+            continue
+
+        feed_id = xml_file.stem
+        source_url = _normalize_url(_find_child_text(channel, "link"))
+        title = _find_child_text(channel, "title") or feed_id
+        description = _find_child_text(channel, "description")
+
+        items: list[FeedItem] = []
+        for item in channel:
+            if _local_name(item.tag) != "item":
+                continue
+
+            guid = _find_child_text(item, "guid").strip() or _find_child_text(item, "link").strip()
+            if not guid:
+                continue
+
+            pub_dt = _parse_pub_date(_find_child_text(item, "pubDate")) or datetime.utcnow()
+            desc_text = _find_child_text(item, "description")
+            xml = "    " + ET.tostring(item, encoding="unicode").replace("\n", "\n    ")
+            items.append(FeedItem(guid=guid, pub_date=pub_dt, xml=xml, description_len=len(desc_text)))
+
+        feeds.append(PodsyncFeed(feed_id=feed_id, source_url=source_url, title=title, description=description, items=items))
+
+    return feeds
+
+
 def sync_channels_from_podsync_config() -> int:
     config_path = Path(settings.podsync_config_path)
     if not config_path.exists():
@@ -103,7 +182,7 @@ def sync_channels_from_podsync_config() -> int:
             if not isinstance(feed_cfg, dict):
                 continue
 
-            url = str(feed_cfg.get("url") or "").strip()
+            url = _normalize_url(str(feed_cfg.get("url") or ""))
             if not url:
                 continue
 
@@ -136,7 +215,6 @@ def ensure_video_metadata(video: Video) -> None:
 
 
 def _load_manual_rows() -> list[tuple[Download, Video]]:
-    now = datetime.utcnow()
     with SessionLocal() as session:
         rows = session.execute(
             select(Download, Video)
@@ -170,7 +248,7 @@ def _load_manual_rows() -> list[tuple[Download, Video]]:
         if changed:
             session.commit()
 
-    rows.sort(key=lambda row: row[1].published_at or row[0].updated_at or now, reverse=True)
+    rows.sort(key=lambda row: row[1].published_at or row[0].updated_at or datetime.utcnow(), reverse=True)
     return rows
 
 
@@ -213,60 +291,6 @@ def _manual_feed_items(rows: list[tuple[Download, Video]]) -> list[FeedItem]:
     return items
 
 
-def _podsync_feed_items() -> list[FeedItem]:
-    data_root = Path(settings.podsync_data_dir)
-    if not data_root.exists():
-        return []
-
-    items: list[FeedItem] = []
-    for xml_file in sorted(data_root.rglob("*.xml")):
-        try:
-            root = ET.parse(xml_file).getroot()
-        except Exception:
-            continue
-
-        for item in root.iter():
-            if _local_name(item.tag) != "item":
-                continue
-
-            guid = _find_child_text(item, "guid").strip() or _find_child_text(item, "link").strip()
-            if not guid:
-                continue
-
-            pub_text = _find_child_text(item, "pubDate")
-            pub_dt = _parse_pub_date(pub_text) or datetime.utcnow()
-            desc_text = _find_child_text(item, "description")
-
-            xml = ET.tostring(item, encoding="unicode")
-            # Normalize indentation a bit for readability
-            xml = "    " + xml.replace("\n", "\n    ")
-            items.append(FeedItem(guid=guid, pub_date=pub_dt, xml=xml, description_len=len(desc_text)))
-
-    return items
-
-
-def _write_feed_file(path: str, title: str, description: str, link: str, items: list[FeedItem]) -> None:
-    now = datetime.utcnow()
-    xml = "\n".join(
-        [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">',
-            "  <channel>",
-            f"    <title>{escape(title)}</title>",
-            f"    <description>{escape(description)}</description>",
-            f"    <link>{escape(link)}</link>",
-            f"    <lastBuildDate>{_format_pub_date(now)}</lastBuildDate>",
-            *[item.xml for item in items],
-            "  </channel>",
-            "</rss>",
-        ]
-    )
-
-    feed_file = Path(path)
-    feed_file.parent.mkdir(parents=True, exist_ok=True)
-    feed_file.write_text(xml + "\n", encoding="utf-8")
-
-
 def regenerate_manual_feed() -> None:
     rows = _load_manual_rows()
     items = _manual_feed_items(rows)
@@ -279,35 +303,63 @@ def regenerate_manual_feed() -> None:
     )
 
 
-def regenerate_merged_feed() -> None:
-    manual_items = _manual_feed_items(_load_manual_rows())
-    podsync_items = _podsync_feed_items()
+def regenerate_merged_feeds() -> None:
+    podsync_feeds = _load_podsync_feeds()
+    by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
+    by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
 
-    by_guid: dict[str, FeedItem] = {}
-    for item in podsync_items + manual_items:
-        existing = by_guid.get(item.guid)
-        if existing is None:
-            by_guid[item.guid] = item
-            continue
-        # Prefer richer metadata, then newer publish date.
-        if item.description_len > existing.description_len:
-            by_guid[item.guid] = item
-        elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
-            by_guid[item.guid] = item
+    manual_rows = _load_manual_rows()
+    manual_by_channel: dict[int, list[tuple[Download, Video]]] = {}
+    for row in manual_rows:
+        manual_by_channel.setdefault(row[1].channel_id, []).append(row)
 
-    merged = sorted(by_guid.values(), key=lambda it: it.pub_date, reverse=True)
-    _write_feed_file(
-        settings.merged_feed_file,
-        settings.merged_feed_title,
-        settings.merged_feed_description,
-        settings.public_base_url.rstrip("/") + settings.merged_feed_path,
-        merged,
-    )
+    with SessionLocal() as session:
+        channels = session.execute(select(Channel).order_by(Channel.id.asc())).scalars().all()
+
+    merged_dir = Path(settings.merged_feed_dir)
+    merged_dir.mkdir(parents=True, exist_ok=True)
+
+    for channel in channels:
+        podsync_feed = by_source_url.get(_normalize_url(channel.url))
+        if podsync_feed is None and channel.name:
+            podsync_feed = by_feed_id.get(channel.name)
+
+        podsync_items = podsync_feed.items if podsync_feed else []
+        manual_items = _manual_feed_items(manual_by_channel.get(channel.id, []))
+
+        by_guid: dict[str, FeedItem] = {}
+        for item in podsync_items + manual_items:
+            existing = by_guid.get(item.guid)
+            if existing is None:
+                by_guid[item.guid] = item
+                continue
+            if item.description_len > existing.description_len:
+                by_guid[item.guid] = item
+            elif item.description_len == existing.description_len and item.pub_date > existing.pub_date:
+                by_guid[item.guid] = item
+
+        merged_items = sorted(by_guid.values(), key=lambda it: it.pub_date, reverse=True)
+        link = settings.public_base_url.rstrip("/") + f"{settings.merged_feed_path_prefix}/{channel.id}.xml"
+        if podsync_feed:
+            title = podsync_feed.title
+            description = podsync_feed.description or settings.merged_feed_description
+        else:
+            channel_name = channel.name or channel.url
+            title = f"{channel_name} {settings.merged_feed_title_suffix}"
+            description = settings.merged_feed_description
+
+        _write_feed_file(
+            str(merged_dir / f"{channel.id}.xml"),
+            title,
+            description,
+            link,
+            merged_items,
+        )
 
 
 def regenerate_all_feeds() -> None:
     regenerate_manual_feed()
-    regenerate_merged_feed()
+    regenerate_merged_feeds()
 
 
 def _handle_index(job: Job) -> None:
@@ -416,6 +468,7 @@ def process_next_job() -> None:
                 regenerate_all_feeds()
             elif job.job_type == "sync_podsync_feeds":
                 sync_channels_from_podsync_config()
+                regenerate_merged_feeds()
             else:
                 raise RuntimeError(f"unknown job type {job.job_type}")
 
@@ -456,7 +509,7 @@ def worker_loop(stop_event: threading.Event) -> None:
         if settings.podsync_feed_sync_interval_seconds > 0 and datetime.utcnow() >= next_feed_sync_at:
             try:
                 sync_channels_from_podsync_config()
-                regenerate_merged_feed()
+                regenerate_merged_feeds()
             except Exception:
                 pass
             next_feed_sync_at = datetime.utcnow() + timedelta(seconds=settings.podsync_feed_sync_interval_seconds)
