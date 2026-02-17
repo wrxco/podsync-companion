@@ -16,7 +16,9 @@ let channelsCache = [];
 let feedInfoCache = null;
 const channelVideoState = {};
 const channelVideoBodies = new Map();
+const openChannelPanels = new Set();
 let downloadStatusByVideoId = {};
+let indexStatusByChannelId = {};
 
 function fmtDate(value) {
   if (!value) return "";
@@ -50,6 +52,15 @@ function mergedUrlForChannel(channelId) {
     return "";
   }
   return feedInfoCache.merged_feed_url_template.replace("{channel_id}", String(channelId));
+}
+
+function formatIndexStatus(channel) {
+  const status = indexStatusByChannelId[String(channel.id)];
+  if (status === "pending") return "index queued";
+  if (status === "running") return "indexing";
+  if (status === "failed") return "index failed";
+  if (channel.last_indexed_at) return `indexed ${fmtDate(channel.last_indexed_at)}`;
+  return "not indexed";
 }
 
 function formatDownloadStatus(videoId) {
@@ -87,6 +98,18 @@ async function refreshDownloadStatuses() {
   refreshStatusCells();
 }
 
+async function refreshIndexStatuses() {
+  const jobs = await api("/api/jobs");
+  const next = {};
+  for (const job of jobs) {
+    if (job.job_type !== "index_channel") continue;
+    const channelId = String((job.payload && job.payload.channel_id) || "");
+    if (!channelId || next[channelId]) continue;
+    next[channelId] = String(job.status || "");
+  }
+  indexStatusByChannelId = next;
+}
+
 function getChannelState(channelId) {
   if (!channelVideoState[channelId]) {
     channelVideoState[channelId] = {
@@ -109,6 +132,9 @@ function buildChannelVideosPanel(channel) {
   const summary = document.createElement("summary");
   summary.textContent = "Videos";
   details.appendChild(summary);
+  if (openChannelPanels.has(channel.id)) {
+    details.open = true;
+  }
 
   const body = document.createElement("div");
   body.className = "channel-videos-body";
@@ -217,6 +243,14 @@ function buildChannelVideosPanel(channel) {
     state.loaded = true;
 
     tbody.innerHTML = "";
+    if (!videos.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5;
+      td.textContent = "No indexed videos yet for this channel.";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
     for (const v of videos) {
       const tr = document.createElement("tr");
       tr.setAttribute("data-video-id", String(v.video_id || ""));
@@ -318,16 +352,24 @@ function buildChannelVideosPanel(channel) {
   });
 
   details.addEventListener("toggle", async () => {
+    if (details.open) openChannelPanels.add(channel.id);
+    else openChannelPanels.delete(channel.id);
     if (details.open && !state.loaded) {
       await loadChannelVideos();
     }
   });
 
   channelVideoBodies.set(channel.id, tbody);
+  if (details.open) {
+    loadChannelVideos().catch((err) => {
+      console.error("channel video load failed", err);
+    });
+  }
   return details;
 }
 
 async function loadChannels() {
+  await refreshIndexStatuses();
   const channels = await api("/api/channels");
   channelsCache = channels;
   channelVideoBodies.clear();
@@ -352,7 +394,7 @@ async function loadChannels() {
 
     const name = ch.name || ch.url;
     const meta = document.createElement("span");
-    meta.textContent = `${name} (${ch.last_indexed_at ? `indexed ${fmtDate(ch.last_indexed_at)}` : "not indexed"})`;
+    meta.textContent = `${name} (${formatIndexStatus(ch)})`;
     header.appendChild(meta);
 
     const mergedUrl = mergedUrlForChannel(ch.id);
@@ -367,9 +409,7 @@ async function loadChannels() {
 
     card.appendChild(header);
 
-    if (ch.last_indexed_at) {
-      card.appendChild(buildChannelVideosPanel(ch));
-    }
+    card.appendChild(buildChannelVideosPanel(ch));
 
     root.appendChild(card);
   }
@@ -462,10 +502,11 @@ async function init() {
   window.setInterval(async () => {
     try {
       await refreshDownloadStatuses();
+      await loadChannels();
     } catch (err) {
-      console.error("download status refresh failed", err);
+      console.error("background refresh failed", err);
     }
-  }, 5000);
+  }, 7000);
 }
 
 init().catch((err) => {
