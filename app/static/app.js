@@ -54,6 +54,13 @@ function mergedUrlForChannel(channelId) {
   return feedInfoCache.merged_feed_url_template.replace("{channel_id}", String(channelId));
 }
 
+function explicitFeedUrl() {
+  if (!feedInfoCache || !feedInfoCache.manual_feed_url) {
+    return "";
+  }
+  return feedInfoCache.manual_feed_url;
+}
+
 function formatIndexStatus(channel) {
   const status = indexStatusByChannelId[String(channel.id)];
   if (status === "pending") return "index queued";
@@ -404,12 +411,29 @@ async function loadChannels() {
 
     const mergedUrl = mergedUrlForChannel(ch.id);
     if (mergedUrl) {
+      const label = document.createElement("span");
+      label.className = "feed-label";
+      label.textContent = "Feeds:";
+      header.appendChild(label);
+
       const link = document.createElement("a");
       link.href = safeHttpUrl(mergedUrl);
       link.target = "_blank";
       link.rel = "noreferrer";
-      link.textContent = "Merged feed";
+      link.textContent = "Merged";
       header.appendChild(link);
+
+      const sep = document.createElement("span");
+      sep.textContent = "|";
+      header.appendChild(sep);
+
+      const explicitUrl = explicitFeedUrl();
+      const explicitLink = document.createElement("a");
+      explicitLink.href = safeHttpUrl(explicitUrl);
+      explicitLink.target = "_blank";
+      explicitLink.rel = "noreferrer";
+      explicitLink.textContent = "Explicit";
+      header.appendChild(explicitLink);
     }
 
     card.appendChild(header);
@@ -423,35 +447,6 @@ async function loadChannels() {
 async function loadFeedInfo() {
   const info = await api("/api/feed");
   feedInfoCache = info;
-  const manual = document.getElementById("manual-feed-link");
-  manual.href = safeHttpUrl(info.manual_feed_url);
-  manual.textContent = info.manual_feed_url;
-
-  const mergedFeeds = await api("/api/feed/merged");
-  const mergedList = document.getElementById("merged-feed-list");
-  mergedList.innerHTML = "";
-  if (!mergedFeeds.length) {
-    mergedList.textContent = "No merged channel feeds generated yet.";
-    return;
-  }
-
-  const heading = document.createElement("div");
-  heading.textContent = "Merged channel feeds";
-  mergedList.appendChild(heading);
-
-  for (const feed of mergedFeeds) {
-    const row = document.createElement("div");
-    const label = document.createElement("span");
-    label.textContent = `${feed.channel_name}: `;
-    const link = document.createElement("a");
-    link.href = safeHttpUrl(feed.url);
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    link.textContent = feed.url;
-    row.appendChild(label);
-    row.appendChild(link);
-    mergedList.appendChild(row);
-  }
 }
 
 document.getElementById("channel-form").addEventListener("submit", async (e) => {
@@ -490,13 +485,6 @@ document.getElementById("index-all-channels").addEventListener("click", async ()
     queued += 1;
   }
   alert(`Queued index jobs for ${queued} channel(s)`);
-  await loadChannels();
-});
-
-document.getElementById("regenerate-feed").addEventListener("click", async () => {
-  await api("/api/feed/regenerate", { method: "POST" });
-  alert("Feed regeneration queued");
-  await loadFeedInfo();
   await loadChannels();
 });
 

@@ -36,6 +36,17 @@ h2 {
   margin-top: 0;
 }
 
+.hint {
+  margin-top: -0.4rem;
+  margin-bottom: 0.75rem;
+  color: #555f70;
+}
+
+.feed-label {
+  font-size: 0.95rem;
+  color: #555f70;
+}
+
 form,
 .toolbar {
   display: flex;
