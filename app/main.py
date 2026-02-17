@@ -46,6 +46,7 @@ ALLOWED_CHANNEL_HOSTS = {
 
 
 VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{6,20}")
+FILENAME_VIDEO_ID_RE = re.compile(r"_([A-Za-z0-9_-]{6,20})\.[^.]+$")
 
 
 def get_db():
@@ -200,6 +201,10 @@ def _extract_video_id(value: str) -> str:
         return match.group(1)
 
     file_part = Path(text.split("?", 1)[0]).name
+    filename_match = FILENAME_VIDEO_ID_RE.search(file_part)
+    if filename_match:
+        return filename_match.group(1)
+
     stem = Path(file_part).stem
     stem_parts = [p for p in stem.split("_") if p]
     for part in reversed(stem_parts):
@@ -246,6 +251,34 @@ def _collect_podsync_downloads() -> dict[str, dict]:
                 "filename": filename or None,
                 "error": None,
             }
+
+    # Also detect already-downloaded Podsync media files even if they are no longer in feed XML.
+    media_exts = {
+        ".mp3",
+        ".m4a",
+        ".mp4",
+        ".mkv",
+        ".webm",
+        ".opus",
+        ".aac",
+        ".flac",
+        ".ogg",
+        ".wav",
+    }
+    for media_file in data_root.rglob("*"):
+        if not media_file.is_file():
+            continue
+        if media_file.suffix.lower() not in media_exts:
+            continue
+        video_id = _extract_video_id(media_file.name)
+        if not video_id or video_id in found:
+            continue
+        found[video_id] = {
+            "video_id": video_id,
+            "status": "podsync",
+            "filename": media_file.name,
+            "error": None,
+        }
 
     return found
 
@@ -461,11 +494,21 @@ def list_downloads(db: Session = Depends(get_db)):
         }
         for d in rows
     ]
-    seen = {str(d["video_id"]) for d in out}
-    for item in _get_podsync_downloads_cached().values():
-        if str(item["video_id"]) in seen:
+    by_video_id = {str(item["video_id"]): item for item in out}
+    for pod_item in _get_podsync_downloads_cached().values():
+        video_id = str(pod_item["video_id"])
+        existing = by_video_id.get(video_id)
+        if existing is None:
+            out.append(pod_item)
+            by_video_id[video_id] = pod_item
             continue
-        out.append(item)
+
+        # Preserve explicit companion states, but backfill blank/unknown status from Podsync presence.
+        existing_status = str(existing.get("status") or "").strip().lower()
+        if not existing_status:
+            existing["status"] = "podsync"
+        if not existing.get("filename"):
+            existing["filename"] = pod_item.get("filename")
     return out
 
 
