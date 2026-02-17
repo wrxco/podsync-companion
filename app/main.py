@@ -1,11 +1,13 @@
 import threading
 from base64 import b64decode
 from collections import defaultdict, deque
+import re
 from hmac import compare_digest
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlparse
+import xml.etree.ElementTree as ET
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -29,6 +31,9 @@ stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
 rate_limit_lock = threading.Lock()
 mutation_request_times: dict[str, deque[float]] = defaultdict(deque)
+podsync_download_cache_lock = threading.Lock()
+podsync_download_cache: dict[str, dict] = {}
+podsync_download_cache_expires_at: float = 0.0
 
 
 ALLOWED_CHANNEL_HOSTS = {
@@ -38,6 +43,9 @@ ALLOWED_CHANNEL_HOSTS = {
     "music.youtube.com",
     "youtu.be",
 }
+
+
+VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{6,20}")
 
 
 def get_db():
@@ -158,6 +166,99 @@ def _redact_error_text(error: str | None) -> str | None:
     if not error:
         return None
     return "Operation failed. Check server logs for details."
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _find_child_text(item: ET.Element, local_name: str) -> str:
+    for child in item:
+        if _local_name(child.tag) == local_name:
+            return child.text or ""
+    return ""
+
+
+def _find_enclosure_url(item: ET.Element) -> str:
+    for child in item:
+        if _local_name(child.tag) == "enclosure":
+            return (child.attrib.get("url") or "").strip()
+    return ""
+
+
+def _extract_video_id(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+
+    match = re.search(r"[?&]v=([A-Za-z0-9_-]{6,20})", text)
+    if match:
+        return match.group(1)
+
+    match = re.search(r"youtu\.be/([A-Za-z0-9_-]{6,20})", text)
+    if match:
+        return match.group(1)
+
+    file_part = Path(text.split("?", 1)[0]).name
+    stem = Path(file_part).stem
+    stem_parts = [p for p in stem.split("_") if p]
+    for part in reversed(stem_parts):
+        if VIDEO_ID_RE.fullmatch(part):
+            return part
+
+    match = VIDEO_ID_RE.fullmatch(text)
+    if match:
+        return text
+
+    return ""
+
+
+def _collect_podsync_downloads() -> dict[str, dict]:
+    data_root = Path(settings.podsync_data_dir)
+    if not data_root.exists():
+        return {}
+
+    found: dict[str, dict] = {}
+    for xml_file in data_root.rglob("*.xml"):
+        try:
+            root = ET.parse(xml_file).getroot()
+        except Exception:
+            continue
+
+        for item in root.iter():
+            if _local_name(item.tag) != "item":
+                continue
+
+            enclosure_url = _find_enclosure_url(item)
+            link = _find_child_text(item, "link")
+            guid = _find_child_text(item, "guid")
+            video_id = _extract_video_id(guid) or _extract_video_id(link) or _extract_video_id(enclosure_url)
+            if not video_id or video_id in found:
+                continue
+
+            filename = ""
+            if enclosure_url:
+                filename = Path(enclosure_url.split("?", 1)[0]).name
+
+            found[video_id] = {
+                "video_id": video_id,
+                "status": "podsync",
+                "filename": filename or None,
+                "error": None,
+            }
+
+    return found
+
+
+def _get_podsync_downloads_cached() -> dict[str, dict]:
+    global podsync_download_cache, podsync_download_cache_expires_at
+    now = monotonic()
+    with podsync_download_cache_lock:
+        if now < podsync_download_cache_expires_at:
+            return dict(podsync_download_cache)
+        podsync_download_cache = _collect_podsync_downloads()
+        podsync_download_cache_expires_at = now + 30.0
+        return dict(podsync_download_cache)
 
 
 @app.on_event("startup")
@@ -321,10 +422,17 @@ def list_videos(
 
 @app.post("/api/downloads/enqueue")
 def enqueue_downloads(payload: EnqueueDownloadIn, db: Session = Depends(get_db)):
+    podsync_downloads = _get_podsync_downloads_cached()
     count = 0
+    skipped_existing = 0
     for video_id in payload.video_ids:
+        if video_id in podsync_downloads:
+            skipped_existing += 1
+            continue
+
         existing = db.execute(select(Download).where(Download.video_id == video_id)).scalar_one_or_none()
         if existing and existing.status in {"queued", "running", "done"}:
+            skipped_existing += 1
             continue
 
         if not existing:
@@ -338,13 +446,13 @@ def enqueue_downloads(payload: EnqueueDownloadIn, db: Session = Depends(get_db))
         count += 1
 
     db.commit()
-    return {"ok": True, "queued": count}
+    return {"ok": True, "queued": count, "skipped_existing": skipped_existing}
 
 
 @app.get("/api/downloads", response_model=list[DownloadOut])
 def list_downloads(db: Session = Depends(get_db)):
     rows = db.execute(select(Download).order_by(Download.id.desc()).limit(200)).scalars().all()
-    return [
+    out = [
         {
             "video_id": d.video_id,
             "status": d.status,
@@ -353,6 +461,12 @@ def list_downloads(db: Session = Depends(get_db)):
         }
         for d in rows
     ]
+    seen = {str(d["video_id"]) for d in out}
+    for item in _get_podsync_downloads_cached().values():
+        if str(item["video_id"]) in seen:
+            continue
+        out.append(item)
+    return out
 
 
 @app.get("/api/jobs")

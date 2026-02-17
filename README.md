@@ -32,6 +32,7 @@ Then:
 4. Select episodes and click `Queue selected`
 
 Each successful manual download updates `manual.xml` and the merged feed for that channel.
+The videos table status also marks episodes as `podsync` when they are already present in Podsync feed XML data.
 
 ## Security defaults
 

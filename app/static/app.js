@@ -302,7 +302,12 @@ function buildChannelVideosPanel(channel) {
       method: "POST",
       body: JSON.stringify({ video_ids: ids }),
     });
-    alert(`Queued ${res.queued} item(s)`);
+    const skipped = Number(res.skipped_existing || 0);
+    if (skipped > 0) {
+      alert(`Queued ${res.queued} item(s), skipped ${skipped} already available item(s)`);
+    } else {
+      alert(`Queued ${res.queued} item(s)`);
+    }
     await refreshDownloadStatuses();
     refreshStatusCells();
   });
