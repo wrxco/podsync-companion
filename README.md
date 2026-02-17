@@ -33,6 +33,13 @@ Then:
 
 Each successful manual download updates `manual.xml` and the merged feed for that channel.
 
+## Security defaults
+
+- Configure HTTP Basic Auth before exposing this service:
+  - `COMPANION_BASIC_AUTH_USERNAME`
+  - `COMPANION_BASIC_AUTH_PASSWORD`
+- Channel/video URL ingestion is restricted to YouTube hosts.
+
 ## Compose notes
 
 - Service name: `podsync-companion`
@@ -58,6 +65,8 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 - `COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml`
 - `COMPANION_PODSYNC_DATA_DIR=/podsync/data`
 - `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
+- `COMPANION_BASIC_AUTH_USERNAME=...`
+- `COMPANION_BASIC_AUTH_PASSWORD=...`
 
 ## Merged feed settings
 

@@ -29,5 +29,10 @@ class Settings(BaseSettings):
     podsync_data_dir: str = "/podsync/data"
     podsync_feed_sync_interval_seconds: int = 300
 
+    # Optional HTTP Basic Auth for all routes (UI/API/feeds/media).
+    # Set both values to enable.
+    basic_auth_username: str = ""
+    basic_auth_password: str = ""
+
 
 settings = Settings()

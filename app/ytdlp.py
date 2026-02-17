@@ -2,14 +2,34 @@ import json
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dateutil.parser import isoparse
+
+ALLOWED_VIDEO_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+}
+
+
+def _is_allowed_url(url: str) -> bool:
+    try:
+        parsed = urlparse((url or "").strip())
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].strip().lower()
+    return host in ALLOWED_VIDEO_HOSTS
 
 
 def run_command(cmd: list[str]) -> str:
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
-        raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{completed.stderr.strip()}")
+        raise RuntimeError("yt-dlp command failed")
     return completed.stdout
 
 
@@ -24,6 +44,9 @@ def is_unavailable_item(item: dict) -> bool:
 
 
 def index_channel(url: str, limit: int = 0) -> list[dict]:
+    if not _is_allowed_url(url):
+        raise RuntimeError("unsupported channel URL host")
+
     cmd = ["yt-dlp", "--flat-playlist", "--dump-json", "--ignore-errors", url]
     output = run_command(cmd)
     videos: list[dict] = []
@@ -102,6 +125,9 @@ def index_channel(url: str, limit: int = 0) -> list[dict]:
 
 
 def get_video_metadata(video_url: str) -> dict:
+    if not _is_allowed_url(video_url):
+        raise RuntimeError("unsupported video URL host")
+
     cmd = ["yt-dlp", "--dump-single-json", "--no-warnings", "--no-playlist", video_url]
     output = run_command(cmd)
     item = json.loads(output)
@@ -126,6 +152,9 @@ def get_video_metadata(video_url: str) -> dict:
 
 
 def download_video(video_url: str, source_dir: str, video_id: str, audio_only: bool = True) -> str:
+    if not _is_allowed_url(video_url):
+        raise RuntimeError("unsupported video URL host")
+
     Path(source_dir).mkdir(parents=True, exist_ok=True)
     template = str(Path(source_dir) / f"{video_id}.%(ext)s")
 

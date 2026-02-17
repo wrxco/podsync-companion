@@ -25,6 +25,26 @@ function fmtDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function tdWithText(value) {
+  const td = document.createElement("td");
+  td.textContent = value || "";
+  return td;
+}
+
+function safeHttpUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "#";
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch (err) {
+    // ignore parse errors and fall back to inert URL
+  }
+  return "#";
+}
+
 function mergedUrlForChannel(channelId) {
   if (!feedInfoCache || !feedInfoCache.merged_feed_url_template) {
     return "";
@@ -85,12 +105,28 @@ async function loadVideos() {
   tbody.innerHTML = "";
   for (const v of videos) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><input type="checkbox" data-video-id="${v.video_id}" /></td>
-      <td>${fmtDate(v.published_at)}</td>
-      <td><a href="${v.webpage_url}" target="_blank" rel="noreferrer">${v.title}</a></td>
-      <td>${v.video_id}</td>
-    `;
+    const cbTd = document.createElement("td");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.setAttribute("data-video-id", String(v.video_id || ""));
+    cbTd.appendChild(cb);
+
+    const dateTd = tdWithText(fmtDate(v.published_at));
+
+    const titleTd = document.createElement("td");
+    const link = document.createElement("a");
+    link.href = safeHttpUrl(v.webpage_url);
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = String(v.title || "");
+    titleTd.appendChild(link);
+
+    const idTd = tdWithText(String(v.video_id || ""));
+
+    tr.appendChild(cbTd);
+    tr.appendChild(dateTd);
+    tr.appendChild(titleTd);
+    tr.appendChild(idTd);
     tbody.appendChild(tr);
   }
   const page = Math.floor(videoOffset / pageSize) + 1;
@@ -105,12 +141,10 @@ async function loadDownloads() {
   tbody.innerHTML = "";
   for (const d of downloads) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${d.video_id}</td>
-      <td>${d.status}</td>
-      <td>${d.filename || ""}</td>
-      <td>${d.error || ""}</td>
-    `;
+    tr.appendChild(tdWithText(String(d.video_id || "")));
+    tr.appendChild(tdWithText(String(d.status || "")));
+    tr.appendChild(tdWithText(String(d.filename || "")));
+    tr.appendChild(tdWithText(String(d.error || "")));
     tbody.appendChild(tr);
   }
 }

@@ -1,9 +1,13 @@
 import threading
+from base64 import b64decode
+from hmac import compare_digest
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -23,12 +27,72 @@ stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
 
 
+ALLOWED_CHANNEL_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+}
+
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def _is_allowed_channel_url(url: str) -> bool:
+    try:
+        parsed = urlparse((url or "").strip())
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].strip().lower()
+    return host in ALLOWED_CHANNEL_HOSTS
+
+
+def _unauthorized():
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "authentication required"},
+        headers={"WWW-Authenticate": "Basic"},
+    )
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next):
+    username = settings.basic_auth_username.strip()
+    password = settings.basic_auth_password.strip()
+    if not username and not password:
+        return await call_next(request)
+    if not username or not password:
+        return _unauthorized()
+
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Basic "):
+        return _unauthorized()
+    encoded = auth[6:].strip()
+    try:
+        decoded = b64decode(encoded).decode("utf-8")
+    except Exception:
+        return _unauthorized()
+    if ":" not in decoded:
+        return _unauthorized()
+    user, pwd = decoded.split(":", 1)
+    if not (compare_digest(user, username) and compare_digest(pwd, password)):
+        return _unauthorized()
+
+    return await call_next(request)
+
+
+def _redact_error_text(error: str | None) -> str | None:
+    if not error:
+        return None
+    return "Operation failed. Check server logs for details."
 
 
 @app.on_event("startup")
@@ -80,6 +144,9 @@ def list_channels(db: Session = Depends(get_db)):
 
 @app.post("/api/channels", response_model=ChannelOut)
 def create_channel(payload: ChannelCreate, db: Session = Depends(get_db)):
+    if not _is_allowed_channel_url(payload.url):
+        raise HTTPException(status_code=400, detail="Only YouTube channel/playlist URLs are allowed")
+
     existing = db.execute(select(Channel).where(Channel.url == payload.url)).scalar_one_or_none()
     if existing:
         return existing
@@ -211,7 +278,16 @@ def enqueue_downloads(payload: EnqueueDownloadIn, db: Session = Depends(get_db))
 
 @app.get("/api/downloads", response_model=list[DownloadOut])
 def list_downloads(db: Session = Depends(get_db)):
-    return db.execute(select(Download).order_by(Download.id.desc()).limit(200)).scalars().all()
+    rows = db.execute(select(Download).order_by(Download.id.desc()).limit(200)).scalars().all()
+    return [
+        {
+            "video_id": d.video_id,
+            "status": d.status,
+            "filename": d.filename,
+            "error": _redact_error_text(d.error),
+        }
+        for d in rows
+    ]
 
 
 @app.get("/api/jobs")
@@ -223,7 +299,7 @@ def list_jobs(db: Session = Depends(get_db)):
             "job_type": j.job_type,
             "status": j.status,
             "payload": j.payload,
-            "error": j.error,
+            "error": _redact_error_text(j.error),
             "created_at": j.created_at,
             "updated_at": j.updated_at,
         }

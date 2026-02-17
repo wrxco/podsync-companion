@@ -34,6 +34,8 @@ services:
       - COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml
       - COMPANION_PODSYNC_DATA_DIR=/podsync/data
       - COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300
+      - COMPANION_BASIC_AUTH_USERNAME=change-me
+      - COMPANION_BASIC_AUTH_PASSWORD=change-me-strong-password
     ports:
       - "8080:8080"
     volumes:

@@ -41,8 +41,6 @@ class EnqueueDownloadIn(BaseModel):
 class DownloadOut(BaseModel):
     video_id: str
     status: str
-    source_path: str | None
-    media_path: str | None
     filename: str | None
     error: str | None
 
