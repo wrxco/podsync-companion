@@ -1,6 +1,8 @@
 async function api(path, options = {}) {
+  const baseHeaders = { "Content-Type": "application/json", "x-companion-csrf": "1" };
+  const mergedHeaders = { ...baseHeaders, ...(options.headers || {}) };
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: mergedHeaders,
     ...options,
   });
   if (!res.ok) {
@@ -13,6 +15,8 @@ async function api(path, options = {}) {
 let channelsCache = [];
 let feedInfoCache = null;
 const channelVideoState = {};
+const channelVideoBodies = new Map();
+let downloadStatusByVideoId = {};
 
 function fmtDate(value) {
   if (!value) return "";
@@ -46,6 +50,41 @@ function mergedUrlForChannel(channelId) {
     return "";
   }
   return feedInfoCache.merged_feed_url_template.replace("{channel_id}", String(channelId));
+}
+
+function formatDownloadStatus(videoId) {
+  const item = downloadStatusByVideoId[String(videoId || "")];
+  if (!item) return "";
+  return item.status || "";
+}
+
+function refreshStatusCells() {
+  for (const tbody of channelVideoBodies.values()) {
+    const rows = tbody.querySelectorAll("tr[data-video-id]");
+    for (const row of rows) {
+      const videoId = row.getAttribute("data-video-id") || "";
+      const statusCell = row.querySelector(".status-cell");
+      if (statusCell) {
+        statusCell.textContent = formatDownloadStatus(videoId);
+      }
+    }
+  }
+}
+
+async function refreshDownloadStatuses() {
+  const downloads = await api("/api/downloads");
+  const next = {};
+  for (const d of downloads) {
+    const videoId = String(d.video_id || "");
+    if (!videoId) continue;
+    next[videoId] = {
+      status: String(d.status || ""),
+      filename: String(d.filename || ""),
+      error: String(d.error || ""),
+    };
+  }
+  downloadStatusByVideoId = next;
+  refreshStatusCells();
 }
 
 function getChannelState(channelId) {
@@ -153,6 +192,7 @@ function buildChannelVideosPanel(channel) {
         <th>Published</th>
         <th>Title</th>
         <th>Video ID</th>
+        <th>Status</th>
       </tr>
     </thead>
   `;
@@ -179,6 +219,7 @@ function buildChannelVideosPanel(channel) {
     tbody.innerHTML = "";
     for (const v of videos) {
       const tr = document.createElement("tr");
+      tr.setAttribute("data-video-id", String(v.video_id || ""));
       const cbTd = document.createElement("td");
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -194,11 +235,14 @@ function buildChannelVideosPanel(channel) {
       link.textContent = String(v.title || "");
       titleTd.appendChild(link);
       const idTd = tdWithText(String(v.video_id || ""));
+      const statusTd = tdWithText(formatDownloadStatus(v.video_id));
+      statusTd.className = "status-cell";
 
       tr.appendChild(cbTd);
       tr.appendChild(dateTd);
       tr.appendChild(titleTd);
       tr.appendChild(idTd);
+      tr.appendChild(statusTd);
       tbody.appendChild(tr);
     }
 
@@ -225,7 +269,8 @@ function buildChannelVideosPanel(channel) {
       body: JSON.stringify({ video_ids: ids }),
     });
     alert(`Queued ${res.queued} item(s)`);
-    await loadDownloads();
+    await refreshDownloadStatuses();
+    refreshStatusCells();
   });
 
   sortSelect.addEventListener("change", async (e) => {
@@ -278,12 +323,14 @@ function buildChannelVideosPanel(channel) {
     }
   });
 
+  channelVideoBodies.set(channel.id, tbody);
   return details;
 }
 
 async function loadChannels() {
   const channels = await api("/api/channels");
   channelsCache = channels;
+  channelVideoBodies.clear();
   const root = document.getElementById("channels");
   root.innerHTML = "";
 
@@ -325,20 +372,6 @@ async function loadChannels() {
     }
 
     root.appendChild(card);
-  }
-}
-
-async function loadDownloads() {
-  const downloads = await api("/api/downloads");
-  const tbody = document.getElementById("downloads");
-  tbody.innerHTML = "";
-  for (const d of downloads) {
-    const tr = document.createElement("tr");
-    tr.appendChild(tdWithText(String(d.video_id || "")));
-    tr.appendChild(tdWithText(String(d.status || "")));
-    tr.appendChild(tdWithText(String(d.filename || "")));
-    tr.appendChild(tdWithText(String(d.error || "")));
-    tbody.appendChild(tr);
   }
 }
 
@@ -415,8 +448,6 @@ document.getElementById("index-all-channels").addEventListener("click", async ()
   await loadChannels();
 });
 
-document.getElementById("refresh-downloads").addEventListener("click", () => loadDownloads());
-
 document.getElementById("regenerate-feed").addEventListener("click", async () => {
   await api("/api/feed/regenerate", { method: "POST" });
   alert("Feed regeneration queued");
@@ -425,9 +456,16 @@ document.getElementById("regenerate-feed").addEventListener("click", async () =>
 });
 
 async function init() {
+  await refreshDownloadStatuses();
   await loadFeedInfo();
   await loadChannels();
-  await loadDownloads();
+  window.setInterval(async () => {
+    try {
+      await refreshDownloadStatuses();
+    } catch (err) {
+      console.error("download status refresh failed", err);
+    }
+  }, 5000);
 }
 
 init().catch((err) => {

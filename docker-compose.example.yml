@@ -21,7 +21,8 @@ services:
       - COMPANION_MEDIA_DIR=/data/media
       - COMPANION_POLL_INTERVAL_SECONDS=3
       - COMPANION_CHANNEL_SCAN_LIMIT=0
-      - COMPANION_PUBLIC_BASE_URL=http://localhost:8080
+      # Set this to your public HTTPS URL when behind a reverse proxy.
+      - COMPANION_PUBLIC_BASE_URL=https://podsync-companion.example.com
       - COMPANION_MEDIA_URL_PATH=/media
       - COMPANION_MANUAL_FEED_PATH=/feeds/manual.xml
       - COMPANION_MANUAL_FEED_FILE=/data/manual.xml
@@ -34,10 +35,16 @@ services:
       - COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml
       - COMPANION_PODSYNC_DATA_DIR=/podsync/data
       - COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300
+      - COMPANION_AUTH_REQUIRED=true
       - COMPANION_BASIC_AUTH_USERNAME=change-me
       - COMPANION_BASIC_AUTH_PASSWORD=change-me-strong-password
+      - COMPANION_CSRF_PROTECTION_ENABLED=true
+      - COMPANION_CSRF_HEADER_NAME=x-companion-csrf
+      - COMPANION_CSRF_HEADER_VALUE=1
+      - COMPANION_API_MUTATION_RATE_LIMIT_PER_MINUTE=60
     ports:
-      - "8080:8080"
+      # Safer default: local bind only; expose publicly through TLS reverse proxy.
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./companion-data:/data
       - ./podsync/config.toml:/podsync/config.toml:ro

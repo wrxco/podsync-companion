@@ -1,8 +1,10 @@
 import threading
 from base64 import b64decode
+from collections import defaultdict, deque
 from hmac import compare_digest
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -25,6 +27,8 @@ app.mount(settings.media_url_path, StaticFiles(directory=settings.media_dir, che
 
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
+rate_limit_lock = threading.Lock()
+mutation_request_times: dict[str, deque[float]] = defaultdict(deque)
 
 
 ALLOWED_CHANNEL_HOSTS = {
@@ -63,13 +67,23 @@ def _unauthorized():
     )
 
 
+def _misconfigured_auth():
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "service auth is required but credentials are not configured"},
+    )
+
+
 @app.middleware("http")
 async def basic_auth_middleware(request: Request, call_next):
     username = settings.basic_auth_username.strip()
     password = settings.basic_auth_password.strip()
-    if not username and not password:
+    if settings.auth_required:
+        if not username or not password:
+            return _misconfigured_auth()
+    elif not username and not password:
         return await call_next(request)
-    if not username or not password:
+    elif not username or not password:
         return _unauthorized()
 
     auth = request.headers.get("authorization", "")
@@ -85,6 +99,47 @@ async def basic_auth_middleware(request: Request, call_next):
     user, pwd = decoded.split(":", 1)
     if not (compare_digest(user, username) and compare_digest(pwd, password)):
         return _unauthorized()
+
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    if not settings.csrf_protection_enabled:
+        return await call_next(request)
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
+        header_name = settings.csrf_header_name.strip().lower()
+        expected = settings.csrf_header_value
+        if not header_name:
+            return JSONResponse(status_code=500, content={"detail": "invalid csrf header configuration"})
+
+        actual = request.headers.get(header_name)
+        if not actual or not compare_digest(actual, expected):
+            return JSONResponse(status_code=403, content={"detail": "missing or invalid csrf header"})
+
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def mutation_rate_limit_middleware(request: Request, call_next):
+    limit = settings.api_mutation_rate_limit_per_minute
+    if limit <= 0:
+        return await call_next(request)
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
+        client_host = (request.client.host if request.client else "") or "unknown"
+        key = f"{client_host}:{request.url.path}"
+        now = monotonic()
+        window_start = now - 60.0
+
+        with rate_limit_lock:
+            bucket = mutation_request_times[key]
+            while bucket and bucket[0] < window_start:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+            bucket.append(now)
 
     return await call_next(request)
 

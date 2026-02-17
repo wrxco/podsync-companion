@@ -30,9 +30,20 @@ class Settings(BaseSettings):
     podsync_feed_sync_interval_seconds: int = 300
 
     # Optional HTTP Basic Auth for all routes (UI/API/feeds/media).
-    # Set both values to enable.
+    # By default auth is required (fail closed); set both values.
+    # Set auth_required=false only for trusted local development.
+    auth_required: bool = True
     basic_auth_username: str = ""
     basic_auth_password: str = ""
+
+    # Require anti-CSRF header for mutating API routes.
+    csrf_protection_enabled: bool = True
+    csrf_header_name: str = "x-companion-csrf"
+    csrf_header_value: str = "1"
+
+    # Basic in-process rate limiting for mutating /api routes.
+    # Set api_mutation_rate_limit_per_minute <= 0 to disable.
+    api_mutation_rate_limit_per_minute: int = 60
 
 
 settings = Settings()

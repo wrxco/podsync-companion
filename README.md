@@ -35,10 +35,34 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 
 ## Security defaults
 
-- Configure HTTP Basic Auth before exposing this service:
+- Auth fails closed by default. You must configure credentials or requests are rejected (`503`):
+  - `COMPANION_AUTH_REQUIRED=true` (default)
   - `COMPANION_BASIC_AUTH_USERNAME`
   - `COMPANION_BASIC_AUTH_PASSWORD`
+- Anti-CSRF protection is enabled by default for mutating API routes (`POST/PUT/PATCH/DELETE` under `/api/*`).
+  Clients must send the configured header:
+  - `COMPANION_CSRF_PROTECTION_ENABLED=true` (default)
+  - `COMPANION_CSRF_HEADER_NAME=x-companion-csrf`
+  - `COMPANION_CSRF_HEADER_VALUE=1`
 - Channel/video URL ingestion is restricted to YouTube hosts.
+- Mutating API routes are rate-limited by default:
+  - `COMPANION_API_MUTATION_RATE_LIMIT_PER_MINUTE=60`
+
+### TLS and exposure
+
+- Do not expose Basic Auth over plain HTTP.
+- Recommended deployment: reverse proxy with HTTPS and local bind for companion (`127.0.0.1:8080:8080`).
+- Set `COMPANION_PUBLIC_BASE_URL` to your public `https://...` URL.
+
+### Operational roadblocks to expect
+
+- If auth credentials are not configured while `COMPANION_AUTH_REQUIRED=true`, all requests fail with `503`.
+- If a non-UI client calls mutating `/api/*` routes without the CSRF header, requests fail with `403`.
+- If a client exceeds the mutation rate limit, requests fail with `429`.
+- To disable these protections for trusted local development only:
+  - `COMPANION_AUTH_REQUIRED=false`
+  - `COMPANION_CSRF_PROTECTION_ENABLED=false`
+  - `COMPANION_API_MUTATION_RATE_LIMIT_PER_MINUTE=0`
 
 ## Compose notes
 
@@ -65,8 +89,13 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 - `COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml`
 - `COMPANION_PODSYNC_DATA_DIR=/podsync/data`
 - `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
+- `COMPANION_AUTH_REQUIRED=true`
 - `COMPANION_BASIC_AUTH_USERNAME=...`
 - `COMPANION_BASIC_AUTH_PASSWORD=...`
+- `COMPANION_CSRF_PROTECTION_ENABLED=true`
+- `COMPANION_CSRF_HEADER_NAME=x-companion-csrf`
+- `COMPANION_CSRF_HEADER_VALUE=1`
+- `COMPANION_API_MUTATION_RATE_LIMIT_PER_MINUTE=60`
 
 ## Merged feed settings
 
