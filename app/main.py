@@ -74,8 +74,18 @@ def _misconfigured_auth():
     )
 
 
+def _is_feed_request(path: str) -> bool:
+    if path == settings.manual_feed_path:
+        return True
+    merged_prefix = settings.merged_feed_path_prefix.rstrip("/")
+    return path.startswith(f"{merged_prefix}/")
+
+
 @app.middleware("http")
 async def basic_auth_middleware(request: Request, call_next):
+    if settings.auth_bypass_feeds and _is_feed_request(request.url.path):
+        return await call_next(request)
+
     username = settings.basic_auth_username.strip()
     password = settings.basic_auth_password.strip()
     if settings.auth_required:

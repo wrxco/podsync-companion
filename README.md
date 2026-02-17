@@ -37,6 +37,7 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 
 - Auth fails closed by default. You must configure credentials or requests are rejected (`503`):
   - `COMPANION_AUTH_REQUIRED=true` (default)
+  - `COMPANION_AUTH_BYPASS_FEEDS=true` (default; `/feeds/manual.xml` and `/feeds/merged/*.xml` bypass auth)
   - `COMPANION_BASIC_AUTH_USERNAME`
   - `COMPANION_BASIC_AUTH_PASSWORD`
 - Anti-CSRF protection is enabled by default for mutating API routes (`POST/PUT/PATCH/DELETE` under `/api/*`).
@@ -92,6 +93,7 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 - `COMPANION_CHANNEL_SCAN_LIMIT=200` (recommended; set `0` for unlimited)
 - `COMPANION_INDEX_COMMAND_TIMEOUT_SECONDS=1800`
 - `COMPANION_AUTH_REQUIRED=true`
+- `COMPANION_AUTH_BYPASS_FEEDS=true`
 - `COMPANION_BASIC_AUTH_USERNAME=...`
 - `COMPANION_BASIC_AUTH_PASSWORD=...`
 - `COMPANION_CSRF_PROTECTION_ENABLED=true`

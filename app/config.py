@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     auth_required: bool = True
     basic_auth_username: str = ""
     basic_auth_password: str = ""
+    auth_bypass_feeds: bool = True
 
     # Require anti-CSRF header for mutating API routes.
     csrf_protection_enabled: bool = True
