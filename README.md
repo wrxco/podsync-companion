@@ -89,6 +89,8 @@ Each successful manual download updates `manual.xml` and the merged feed for tha
 - `COMPANION_PODSYNC_CONFIG_PATH=/podsync/config.toml`
 - `COMPANION_PODSYNC_DATA_DIR=/podsync/data`
 - `COMPANION_PODSYNC_FEED_SYNC_INTERVAL_SECONDS=300`
+- `COMPANION_CHANNEL_SCAN_LIMIT=200` (recommended; set `0` for unlimited)
+- `COMPANION_INDEX_COMMAND_TIMEOUT_SECONDS=1800`
 - `COMPANION_AUTH_REQUIRED=true`
 - `COMPANION_BASIC_AUTH_USERNAME=...`
 - `COMPANION_BASIC_AUTH_PASSWORD=...`

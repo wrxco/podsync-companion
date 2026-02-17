@@ -1,10 +1,13 @@
 import json
+import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 from dateutil.parser import isoparse
+
+logger = logging.getLogger("uvicorn.error")
 
 ALLOWED_VIDEO_HOSTS = {
     "youtube.com",
@@ -26,8 +29,11 @@ def _is_allowed_url(url: str) -> bool:
     return host in ALLOWED_VIDEO_HOSTS
 
 
-def run_command(cmd: list[str]) -> str:
-    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+def run_command(cmd: list[str], timeout_seconds: int | None = None) -> str:
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"yt-dlp command timed out after {timeout_seconds}s") from exc
     if completed.returncode != 0:
         raise RuntimeError("yt-dlp command failed")
     return completed.stdout
@@ -43,12 +49,18 @@ def is_unavailable_item(item: dict) -> bool:
     return False
 
 
-def index_channel(url: str, limit: int = 0) -> list[dict]:
+def index_channel(url: str, limit: int = 0, timeout_seconds: int | None = None) -> list[dict]:
     if not _is_allowed_url(url):
         raise RuntimeError("unsupported channel URL host")
 
     cmd = ["yt-dlp", "--flat-playlist", "--dump-json", "--ignore-errors", url]
-    output = run_command(cmd)
+    if limit and limit > 0:
+        # Enforce scan limit inside yt-dlp so large playlists don't appear stuck.
+        cmd[1:1] = ["--playlist-end", str(limit)]
+
+    logger.info("index_channel starting: url=%s limit=%s timeout=%s", url, limit, timeout_seconds)
+    output = run_command(cmd, timeout_seconds=timeout_seconds)
+    logger.info("index_channel completed: url=%s", url)
     videos: list[dict] = []
 
     for line in output.splitlines():

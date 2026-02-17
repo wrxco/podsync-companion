@@ -20,7 +20,8 @@ services:
       - COMPANION_SOURCE_DIR=/data/source
       - COMPANION_MEDIA_DIR=/data/media
       - COMPANION_POLL_INTERVAL_SECONDS=3
-      - COMPANION_CHANNEL_SCAN_LIMIT=0
+      - COMPANION_CHANNEL_SCAN_LIMIT=200
+      - COMPANION_INDEX_COMMAND_TIMEOUT_SECONDS=1800
       # Set this to your public HTTPS URL when behind a reverse proxy.
       - COMPANION_PUBLIC_BASE_URL=https://podsync-companion.example.com
       - COMPANION_MEDIA_URL_PATH=/media

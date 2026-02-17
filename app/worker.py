@@ -19,7 +19,7 @@ from .database import SessionLocal
 from .models import Channel, Download, Job, Video
 from .ytdlp import download_video, get_video_metadata, index_channel
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
@@ -446,7 +446,25 @@ def _handle_index(job: Job) -> None:
         channel = session.get(Channel, channel_id)
         if channel is None:
             raise RuntimeError(f"channel {channel_id} not found")
-        entries = index_channel(channel.url, settings.channel_scan_limit)
+        logger.info(
+            "index job started: job_id=%s channel_id=%s url=%s scan_limit=%s timeout=%s",
+            job.id,
+            channel.id,
+            channel.url,
+            settings.channel_scan_limit,
+            settings.index_command_timeout_seconds,
+        )
+        entries = index_channel(
+            channel.url,
+            settings.channel_scan_limit,
+            settings.index_command_timeout_seconds,
+        )
+        logger.info(
+            "index job fetched entries: job_id=%s channel_id=%s entries=%s",
+            job.id,
+            channel.id,
+            len(entries),
+        )
 
         for entry in entries:
             existing = session.execute(
@@ -479,6 +497,7 @@ def _handle_index(job: Job) -> None:
 
         channel.last_indexed_at = datetime.utcnow()
         session.commit()
+        logger.info("index job committed: job_id=%s channel_id=%s", job.id, channel.id)
 
 
 def _handle_download(job: Job) -> None:

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     source_dir: str = "/data/source"
     media_dir: str = "/data/media"
     channel_scan_limit: int = 0  # 0 means unlimited
+    index_command_timeout_seconds: int = 1800
     public_base_url: str = "http://localhost:8080"
     media_url_path: str = "/media"
     manual_feed_path: str = "/feeds/manual.xml"
