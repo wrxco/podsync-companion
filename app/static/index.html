@@ -27,6 +27,14 @@
         <div class="toolbar">
           <button id="refresh-videos">Refresh list</button>
           <button id="enqueue-selected">Queue selected</button>
+          <label for="video-sort">Sort</label>
+          <select id="video-sort">
+            <option value="desc" selected>Published newest first</option>
+            <option value="asc">Published oldest first</option>
+          </select>
+          <input id="video-search" placeholder="Search title, ID, description, uploader" />
+          <button id="video-search-apply" type="button">Search</button>
+          <button id="video-search-clear" type="button">Clear</button>
           <label for="page-size">Per page</label>
           <select id="page-size">
             <option value="50">50</option>

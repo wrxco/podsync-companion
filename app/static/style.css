@@ -44,10 +44,15 @@ form,
 }
 
 input,
-button {
+button,
+select {
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+#video-search {
+  min-width: 20rem;
 }
 
 button {

@@ -13,6 +13,8 @@ async function api(path, options = {}) {
 let videoOffset = 0;
 let pageSize = 100;
 let lastVideoCount = 0;
+let videoSort = "desc";
+let videoSearch = "";
 let channelsCache = [];
 let feedInfoCache = null;
 
@@ -67,9 +69,17 @@ async function loadChannels() {
 }
 
 async function loadVideos() {
-  const videos = await api(
-    `/api/videos?limit=${pageSize}&offset=${videoOffset}&sort=asc&include_unavailable=false`
-  );
+  const params = new URLSearchParams({
+    limit: String(pageSize),
+    offset: String(videoOffset),
+    sort: videoSort,
+    include_unavailable: "false",
+  });
+  if (videoSearch) {
+    params.set("q", videoSearch);
+  }
+
+  const videos = await api(`/api/videos?${params.toString()}`);
   lastVideoCount = videos.length;
   const tbody = document.getElementById("videos");
   tbody.innerHTML = "";
@@ -180,6 +190,29 @@ document.getElementById("index-all-channels").addEventListener("click", async ()
 
 document.getElementById("refresh-videos").addEventListener("click", () => loadVideos());
 document.getElementById("refresh-downloads").addEventListener("click", () => loadDownloads());
+document.getElementById("video-sort").addEventListener("change", async (e) => {
+  videoSort = e.target.value === "asc" ? "asc" : "desc";
+  videoOffset = 0;
+  await loadVideos();
+});
+document.getElementById("video-search-apply").addEventListener("click", async () => {
+  videoSearch = document.getElementById("video-search").value.trim();
+  videoOffset = 0;
+  await loadVideos();
+});
+document.getElementById("video-search-clear").addEventListener("click", async () => {
+  document.getElementById("video-search").value = "";
+  videoSearch = "";
+  videoOffset = 0;
+  await loadVideos();
+});
+document.getElementById("video-search").addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  videoSearch = e.target.value.trim();
+  videoOffset = 0;
+  await loadVideos();
+});
 document.getElementById("page-size").addEventListener("change", async (e) => {
   pageSize = Number(e.target.value) || 100;
   videoOffset = 0;

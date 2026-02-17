@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -115,7 +115,8 @@ def list_videos(
     channel_id: int | None = None,
     limit: int = 100,
     offset: int = 0,
-    sort: str = "asc",
+    sort: str = "desc",
+    q: str | None = None,
     include_unavailable: bool = False,
     db: Session = Depends(get_db),
 ):
@@ -124,6 +125,17 @@ def list_videos(
     query = select(Video)
     if channel_id is not None:
         query = query.where(Video.channel_id == channel_id)
+
+    if q is not None and q.strip():
+        needle = f"%{q.strip().lower()}%"
+        query = query.where(
+            or_(
+                func.lower(Video.title).like(needle),
+                func.lower(Video.video_id).like(needle),
+                func.lower(Video.description).like(needle),
+                func.lower(Video.uploader).like(needle),
+            )
+        )
 
     if not include_unavailable:
         lowered = func.lower(Video.title)
