@@ -47,6 +47,7 @@ ALLOWED_CHANNEL_HOSTS = {
 
 VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{6,20}")
 FILENAME_VIDEO_ID_RE = re.compile(r"_([A-Za-z0-9_-]{6,20})\.[^.]+$")
+YOUTUBE_VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 
 
 def get_db():
@@ -201,11 +202,18 @@ def _extract_video_id(value: str) -> str:
         return match.group(1)
 
     file_part = Path(text.split("?", 1)[0]).name
+    stem = Path(file_part).stem
+
+    # Prefer canonical YouTube ID at end of filename; handles IDs beginning with "_".
+    if len(stem) >= 11:
+        tail = stem[-11:]
+        if YOUTUBE_VIDEO_ID_RE.fullmatch(tail):
+            return tail
+
     filename_match = FILENAME_VIDEO_ID_RE.search(file_part)
     if filename_match:
         return filename_match.group(1)
 
-    stem = Path(file_part).stem
     stem_parts = [p for p in stem.split("_") if p]
     for part in reversed(stem_parts):
         if VIDEO_ID_RE.fullmatch(part):
