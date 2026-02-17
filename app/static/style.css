@@ -39,6 +39,8 @@ h2 {
 form,
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
@@ -52,6 +54,10 @@ select {
 }
 
 #video-search {
+  min-width: 20rem;
+}
+
+.video-search {
   min-width: 20rem;
 }
 
@@ -78,4 +84,31 @@ td {
 #channels button {
   margin-right: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.channel-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.channel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.channel-videos {
+  margin-top: 0.5rem;
+}
+
+.channel-videos > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.channel-videos-body {
+  margin-top: 0.5rem;
 }

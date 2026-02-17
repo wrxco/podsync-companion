@@ -10,13 +10,9 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-let videoOffset = 0;
-let pageSize = 100;
-let lastVideoCount = 0;
-let videoSort = "desc";
-let videoSearch = "";
 let channelsCache = [];
 let feedInfoCache = null;
+const channelVideoState = {};
 
 function fmtDate(value) {
   if (!value) return "";
@@ -52,87 +48,284 @@ function mergedUrlForChannel(channelId) {
   return feedInfoCache.merged_feed_url_template.replace("{channel_id}", String(channelId));
 }
 
+function getChannelState(channelId) {
+  if (!channelVideoState[channelId]) {
+    channelVideoState[channelId] = {
+      offset: 0,
+      pageSize: 50,
+      lastCount: 0,
+      sort: "desc",
+      q: "",
+      loaded: false,
+    };
+  }
+  return channelVideoState[channelId];
+}
+
+function buildChannelVideosPanel(channel) {
+  const state = getChannelState(channel.id);
+  const details = document.createElement("details");
+  details.className = "channel-videos";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "Videos";
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "channel-videos-body";
+  details.appendChild(body);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "toolbar";
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.type = "button";
+  toolbar.appendChild(refreshBtn);
+
+  const queueBtn = document.createElement("button");
+  queueBtn.textContent = "Queue selected";
+  queueBtn.type = "button";
+  toolbar.appendChild(queueBtn);
+
+  const sortLabel = document.createElement("label");
+  sortLabel.textContent = "Sort";
+  toolbar.appendChild(sortLabel);
+
+  const sortSelect = document.createElement("select");
+  sortSelect.innerHTML = `
+    <option value="desc">Published newest first</option>
+    <option value="asc">Published oldest first</option>
+  `;
+  sortSelect.value = state.sort;
+  toolbar.appendChild(sortSelect);
+
+  const searchInput = document.createElement("input");
+  searchInput.placeholder = "Search title, ID, description, uploader";
+  searchInput.value = state.q;
+  searchInput.className = "video-search";
+  toolbar.appendChild(searchInput);
+
+  const searchBtn = document.createElement("button");
+  searchBtn.textContent = "Search";
+  searchBtn.type = "button";
+  toolbar.appendChild(searchBtn);
+
+  const clearBtn = document.createElement("button");
+  clearBtn.textContent = "Clear";
+  clearBtn.type = "button";
+  toolbar.appendChild(clearBtn);
+
+  const pageSizeLabel = document.createElement("label");
+  pageSizeLabel.textContent = "Per page";
+  toolbar.appendChild(pageSizeLabel);
+
+  const pageSizeSelect = document.createElement("select");
+  pageSizeSelect.innerHTML = `
+    <option value="25">25</option>
+    <option value="50">50</option>
+    <option value="100">100</option>
+    <option value="250">250</option>
+  `;
+  pageSizeSelect.value = String(state.pageSize);
+  toolbar.appendChild(pageSizeSelect);
+
+  const prevBtn = document.createElement("button");
+  prevBtn.textContent = "Prev";
+  prevBtn.type = "button";
+  toolbar.appendChild(prevBtn);
+
+  const nextBtn = document.createElement("button");
+  nextBtn.textContent = "Next";
+  nextBtn.type = "button";
+  toolbar.appendChild(nextBtn);
+
+  const pageInfo = document.createElement("span");
+  toolbar.appendChild(pageInfo);
+
+  body.appendChild(toolbar);
+
+  const table = document.createElement("table");
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th></th>
+        <th>Published</th>
+        <th>Title</th>
+        <th>Video ID</th>
+      </tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
+  body.appendChild(table);
+
+  async function loadChannelVideos() {
+    const params = new URLSearchParams({
+      channel_id: String(channel.id),
+      limit: String(state.pageSize),
+      offset: String(state.offset),
+      sort: state.sort,
+      include_unavailable: "false",
+    });
+    if (state.q) {
+      params.set("q", state.q);
+    }
+
+    const videos = await api(`/api/videos?${params.toString()}`);
+    state.lastCount = videos.length;
+    state.loaded = true;
+
+    tbody.innerHTML = "";
+    for (const v of videos) {
+      const tr = document.createElement("tr");
+      const cbTd = document.createElement("td");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.setAttribute("data-video-id", String(v.video_id || ""));
+      cbTd.appendChild(cb);
+
+      const dateTd = tdWithText(fmtDate(v.published_at));
+      const titleTd = document.createElement("td");
+      const link = document.createElement("a");
+      link.href = safeHttpUrl(v.webpage_url);
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = String(v.title || "");
+      titleTd.appendChild(link);
+      const idTd = tdWithText(String(v.video_id || ""));
+
+      tr.appendChild(cbTd);
+      tr.appendChild(dateTd);
+      tr.appendChild(titleTd);
+      tr.appendChild(idTd);
+      tbody.appendChild(tr);
+    }
+
+    const page = Math.floor(state.offset / state.pageSize) + 1;
+    pageInfo.textContent = `Page ${page}`;
+    prevBtn.disabled = state.offset === 0;
+    nextBtn.disabled = state.lastCount < state.pageSize;
+  }
+
+  refreshBtn.addEventListener("click", async () => {
+    await loadChannelVideos();
+  });
+
+  queueBtn.addEventListener("click", async () => {
+    const ids = Array.from(tbody.querySelectorAll("input[type=checkbox]:checked")).map((x) =>
+      x.getAttribute("data-video-id")
+    );
+    if (!ids.length) {
+      alert("Select at least one video");
+      return;
+    }
+    const res = await api("/api/downloads/enqueue", {
+      method: "POST",
+      body: JSON.stringify({ video_ids: ids }),
+    });
+    alert(`Queued ${res.queued} item(s)`);
+    await loadDownloads();
+  });
+
+  sortSelect.addEventListener("change", async (e) => {
+    state.sort = e.target.value === "asc" ? "asc" : "desc";
+    state.offset = 0;
+    await loadChannelVideos();
+  });
+
+  searchBtn.addEventListener("click", async () => {
+    state.q = searchInput.value.trim();
+    state.offset = 0;
+    await loadChannelVideos();
+  });
+
+  clearBtn.addEventListener("click", async () => {
+    searchInput.value = "";
+    state.q = "";
+    state.offset = 0;
+    await loadChannelVideos();
+  });
+
+  searchInput.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    state.q = searchInput.value.trim();
+    state.offset = 0;
+    await loadChannelVideos();
+  });
+
+  pageSizeSelect.addEventListener("change", async (e) => {
+    state.pageSize = Number(e.target.value) || 50;
+    state.offset = 0;
+    await loadChannelVideos();
+  });
+
+  prevBtn.addEventListener("click", async () => {
+    state.offset = Math.max(0, state.offset - state.pageSize);
+    await loadChannelVideos();
+  });
+
+  nextBtn.addEventListener("click", async () => {
+    if (state.lastCount < state.pageSize) return;
+    state.offset += state.pageSize;
+    await loadChannelVideos();
+  });
+
+  details.addEventListener("toggle", async () => {
+    if (details.open && !state.loaded) {
+      await loadChannelVideos();
+    }
+  });
+
+  return details;
+}
+
 async function loadChannels() {
   const channels = await api("/api/channels");
   channelsCache = channels;
   const root = document.getElementById("channels");
   root.innerHTML = "";
+
   for (const ch of channels) {
-    const wrap = document.createElement("div");
-    const name = ch.name || ch.url;
-    const text = document.createElement("span");
-    text.textContent = `${name} (${ch.last_indexed_at ? `indexed ${fmtDate(ch.last_indexed_at)}` : "not indexed"})`;
+    const card = document.createElement("div");
+    card.className = "channel-card";
+
+    const header = document.createElement("div");
+    header.className = "channel-header";
 
     const btn = document.createElement("button");
     btn.textContent = "Index channel";
+    btn.type = "button";
     btn.onclick = async () => {
       await api(`/api/channels/${ch.id}/index`, { method: "POST" });
       alert("Index job queued");
     };
+    header.appendChild(btn);
 
-    wrap.appendChild(btn);
-    wrap.appendChild(text);
+    const name = ch.name || ch.url;
+    const meta = document.createElement("span");
+    meta.textContent = `${name} (${ch.last_indexed_at ? `indexed ${fmtDate(ch.last_indexed_at)}` : "not indexed"})`;
+    header.appendChild(meta);
 
     const mergedUrl = mergedUrlForChannel(ch.id);
     if (mergedUrl) {
       const link = document.createElement("a");
-      link.href = mergedUrl;
+      link.href = safeHttpUrl(mergedUrl);
       link.target = "_blank";
       link.rel = "noreferrer";
       link.textContent = "Merged feed";
-      wrap.appendChild(document.createTextNode(" "));
-      wrap.appendChild(link);
+      header.appendChild(link);
     }
 
-    root.appendChild(wrap);
+    card.appendChild(header);
+
+    if (ch.last_indexed_at) {
+      card.appendChild(buildChannelVideosPanel(ch));
+    }
+
+    root.appendChild(card);
   }
-}
-
-async function loadVideos() {
-  const params = new URLSearchParams({
-    limit: String(pageSize),
-    offset: String(videoOffset),
-    sort: videoSort,
-    include_unavailable: "false",
-  });
-  if (videoSearch) {
-    params.set("q", videoSearch);
-  }
-
-  const videos = await api(`/api/videos?${params.toString()}`);
-  lastVideoCount = videos.length;
-  const tbody = document.getElementById("videos");
-  tbody.innerHTML = "";
-  for (const v of videos) {
-    const tr = document.createElement("tr");
-    const cbTd = document.createElement("td");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.setAttribute("data-video-id", String(v.video_id || ""));
-    cbTd.appendChild(cb);
-
-    const dateTd = tdWithText(fmtDate(v.published_at));
-
-    const titleTd = document.createElement("td");
-    const link = document.createElement("a");
-    link.href = safeHttpUrl(v.webpage_url);
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    link.textContent = String(v.title || "");
-    titleTd.appendChild(link);
-
-    const idTd = tdWithText(String(v.video_id || ""));
-
-    tr.appendChild(cbTd);
-    tr.appendChild(dateTd);
-    tr.appendChild(titleTd);
-    tr.appendChild(idTd);
-    tbody.appendChild(tr);
-  }
-  const page = Math.floor(videoOffset / pageSize) + 1;
-  document.getElementById("page-info").textContent = `Page ${page}`;
-  document.getElementById("prev-page").disabled = videoOffset === 0;
-  document.getElementById("next-page").disabled = lastVideoCount < pageSize;
 }
 
 async function loadDownloads() {
@@ -153,12 +346,12 @@ async function loadFeedInfo() {
   const info = await api("/api/feed");
   feedInfoCache = info;
   const manual = document.getElementById("manual-feed-link");
-  manual.href = info.manual_feed_url;
+  manual.href = safeHttpUrl(info.manual_feed_url);
   manual.textContent = info.manual_feed_url;
+
   const mergedFeeds = await api("/api/feed/merged");
   const mergedList = document.getElementById("merged-feed-list");
   mergedList.innerHTML = "";
-
   if (!mergedFeeds.length) {
     mergedList.textContent = "No merged channel feeds generated yet.";
     return;
@@ -173,7 +366,7 @@ async function loadFeedInfo() {
     const label = document.createElement("span");
     label.textContent = `${feed.channel_name}: `;
     const link = document.createElement("a");
-    link.href = feed.url;
+    link.href = safeHttpUrl(feed.url);
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = feed.url;
@@ -222,45 +415,8 @@ document.getElementById("index-all-channels").addEventListener("click", async ()
   await loadChannels();
 });
 
-document.getElementById("refresh-videos").addEventListener("click", () => loadVideos());
 document.getElementById("refresh-downloads").addEventListener("click", () => loadDownloads());
-document.getElementById("video-sort").addEventListener("change", async (e) => {
-  videoSort = e.target.value === "asc" ? "asc" : "desc";
-  videoOffset = 0;
-  await loadVideos();
-});
-document.getElementById("video-search-apply").addEventListener("click", async () => {
-  videoSearch = document.getElementById("video-search").value.trim();
-  videoOffset = 0;
-  await loadVideos();
-});
-document.getElementById("video-search-clear").addEventListener("click", async () => {
-  document.getElementById("video-search").value = "";
-  videoSearch = "";
-  videoOffset = 0;
-  await loadVideos();
-});
-document.getElementById("video-search").addEventListener("keydown", async (e) => {
-  if (e.key !== "Enter") return;
-  e.preventDefault();
-  videoSearch = e.target.value.trim();
-  videoOffset = 0;
-  await loadVideos();
-});
-document.getElementById("page-size").addEventListener("change", async (e) => {
-  pageSize = Number(e.target.value) || 100;
-  videoOffset = 0;
-  await loadVideos();
-});
-document.getElementById("prev-page").addEventListener("click", async () => {
-  videoOffset = Math.max(0, videoOffset - pageSize);
-  await loadVideos();
-});
-document.getElementById("next-page").addEventListener("click", async () => {
-  if (lastVideoCount < pageSize) return;
-  videoOffset += pageSize;
-  await loadVideos();
-});
+
 document.getElementById("regenerate-feed").addEventListener("click", async () => {
   await api("/api/feed/regenerate", { method: "POST" });
   alert("Feed regeneration queued");
@@ -268,28 +424,9 @@ document.getElementById("regenerate-feed").addEventListener("click", async () =>
   await loadChannels();
 });
 
-document.getElementById("enqueue-selected").addEventListener("click", async () => {
-  const ids = Array.from(document.querySelectorAll("#videos input[type=checkbox]:checked")).map((x) =>
-    x.getAttribute("data-video-id")
-  );
-
-  if (!ids.length) {
-    alert("Select at least one video");
-    return;
-  }
-
-  const res = await api("/api/downloads/enqueue", {
-    method: "POST",
-    body: JSON.stringify({ video_ids: ids }),
-  });
-  alert(`Queued ${res.queued} item(s)`);
-  await loadDownloads();
-});
-
 async function init() {
   await loadFeedInfo();
   await loadChannels();
-  await loadVideos();
   await loadDownloads();
 }
 
