@@ -1,4 +1,5 @@
 import mimetypes
+import logging
 import os
 import re
 import threading
@@ -17,6 +18,8 @@ from .config import settings
 from .database import SessionLocal
 from .models import Channel, Download, Job, Video
 from .ytdlp import download_video, get_video_metadata, index_channel
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -579,14 +582,18 @@ def worker_loop(stop_event: threading.Event) -> None:
     next_feed_sync_at = datetime.utcnow()
 
     while not stop_event.is_set():
-        process_next_job()
+        try:
+            process_next_job()
+        except Exception:
+            # Keep worker alive on unexpected polling/DB exceptions.
+            logger.exception("worker loop failed while processing next job")
 
         if settings.podsync_feed_sync_interval_seconds > 0 and datetime.utcnow() >= next_feed_sync_at:
             try:
                 sync_channels_from_podsync_config()
                 regenerate_merged_feeds()
             except Exception:
-                pass
+                logger.exception("worker loop failed during periodic podsync feed sync")
             next_feed_sync_at = datetime.utcnow() + timedelta(seconds=settings.podsync_feed_sync_interval_seconds)
 
         stop_event.wait(settings.poll_interval_seconds)
