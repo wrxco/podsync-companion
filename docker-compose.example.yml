@@ -1,5 +1,6 @@
 services:
   podsync:
+    # Companion supports upstream Podsync naming; filename-template changes are optional.
     image: ghcr.io/wrxco/podsync:filename-template
     container_name: podsync
     restart: unless-stopped

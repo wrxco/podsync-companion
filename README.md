@@ -31,6 +31,12 @@ services:
       - ./podsync/data:/podsync/data:ro
 ```
 
+## Podsync Compatibility
+
+- Works with upstream/original Podsync feeds.
+- Works with Podsync builds that include your PR, even when filename adjustment is disabled.
+- Filename templates that embed video IDs are optional; they only improve best-effort detection of older local files no longer present in Podsync feed XML.
+
 ## Docs
 
 - Full configuration reference (all options, defaults, behavior): `docs/configuration.md`

@@ -1,7 +1,6 @@
 import threading
 from base64 import b64decode
 from collections import defaultdict, deque
-import re
 from hmac import compare_digest
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +20,7 @@ from .database import Base, SessionLocal, engine
 from .models import Channel, Download, Job, Video
 from .schemas import ChannelCreate, ChannelOut, DownloadOut, EnqueueDownloadIn, VideoOut
 from .worker import regenerate_all_feeds, sync_channels_from_podsync_config, worker_loop
+from .video_id import extract_video_id
 from .ytdlp import get_video_metadata
 
 app = FastAPI(title="podsync-companion")
@@ -34,6 +34,7 @@ mutation_request_times: dict[str, deque[float]] = defaultdict(deque)
 podsync_download_cache_lock = threading.Lock()
 podsync_download_cache: dict[str, dict] = {}
 podsync_download_cache_expires_at: float = 0.0
+podsync_filename_video_id_hints: dict[str, str] = {}
 
 
 ALLOWED_CHANNEL_HOSTS = {
@@ -43,11 +44,6 @@ ALLOWED_CHANNEL_HOSTS = {
     "music.youtube.com",
     "youtu.be",
 }
-
-
-VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{6,20}")
-FILENAME_VIDEO_ID_RE = re.compile(r"_([A-Za-z0-9_-]{6,20})\.[^.]+$")
-YOUTUBE_VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 
 
 def get_db():
@@ -189,49 +185,37 @@ def _find_enclosure_url(item: ET.Element) -> str:
 
 
 def _extract_video_id(value: str) -> str:
-    text = (value or "").strip()
+    return extract_video_id(value)
+
+
+def _looks_like_video_ref(value: str) -> bool:
+    text = (value or "").strip().lower()
     if not text:
-        return ""
+        return False
+    return "youtu" in text or "youtube.com" in text or "v=" in text or "://" in text
 
-    match = re.search(r"[?&]v=([A-Za-z0-9_-]{6,20})", text)
-    if match:
-        return match.group(1)
 
-    match = re.search(r"youtu\.be/([A-Za-z0-9_-]{6,20})", text)
-    if match:
-        return match.group(1)
-
-    file_part = Path(text.split("?", 1)[0]).name
-    stem = Path(file_part).stem
-
-    # Prefer canonical YouTube ID at end of filename; handles IDs beginning with "_".
-    if len(stem) >= 11:
-        tail = stem[-11:]
-        if YOUTUBE_VIDEO_ID_RE.fullmatch(tail):
-            return tail
-
-    filename_match = FILENAME_VIDEO_ID_RE.search(file_part)
-    if filename_match:
-        return filename_match.group(1)
-
-    stem_parts = [p for p in stem.split("_") if p]
-    for part in reversed(stem_parts):
-        if VIDEO_ID_RE.fullmatch(part):
-            return part
-
-    match = VIDEO_ID_RE.fullmatch(text)
-    if match:
-        return text
-
-    return ""
+def _iter_item_id_candidates(item: ET.Element) -> list[str]:
+    candidates: list[str] = []
+    for child in item:
+        child_text = (child.text or "").strip()
+        if child_text and _looks_like_video_ref(child_text):
+            candidates.append(child_text)
+        for attr_name in ("url", "href", "src"):
+            attr_value = (child.attrib.get(attr_name) or "").strip()
+            if attr_value:
+                candidates.append(attr_value)
+    return candidates
 
 
 def _collect_podsync_downloads() -> dict[str, dict]:
+    global podsync_filename_video_id_hints
     data_root = Path(settings.podsync_data_dir)
     if not data_root.exists():
         return {}
 
     found: dict[str, dict] = {}
+    filename_hits: dict[str, set[str]] = defaultdict(set)
     for xml_file in data_root.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
@@ -243,15 +227,31 @@ def _collect_podsync_downloads() -> dict[str, dict]:
                 continue
 
             enclosure_url = _find_enclosure_url(item)
-            link = _find_child_text(item, "link")
-            guid = _find_child_text(item, "guid")
-            video_id = _extract_video_id(guid) or _extract_video_id(link) or _extract_video_id(enclosure_url)
+            filename = Path(enclosure_url.split("?", 1)[0]).name if enclosure_url else ""
+            video_id = ""
+
+            for candidate in (
+                _find_child_text(item, "guid"),
+                _find_child_text(item, "link"),
+                enclosure_url,
+            ):
+                video_id = _extract_video_id(candidate)
+                if video_id:
+                    break
+
+            if not video_id:
+                for candidate in _iter_item_id_candidates(item):
+                    video_id = _extract_video_id(candidate)
+                    if video_id:
+                        break
+
+            if not video_id:
+                video_id = _extract_video_id(ET.tostring(item, encoding="unicode"))
+
+            if filename and video_id:
+                filename_hits[filename].add(video_id)
             if not video_id or video_id in found:
                 continue
-
-            filename = ""
-            if enclosure_url:
-                filename = Path(enclosure_url.split("?", 1)[0]).name
 
             found[video_id] = {
                 "video_id": video_id,
@@ -259,6 +259,12 @@ def _collect_podsync_downloads() -> dict[str, dict]:
                 "filename": filename or None,
                 "error": None,
             }
+
+    for filename, ids in filename_hits.items():
+        if len(ids) == 1:
+            podsync_filename_video_id_hints[filename] = next(iter(ids))
+        else:
+            podsync_filename_video_id_hints.pop(filename, None)
 
     # Also detect already-downloaded Podsync media files even if they are no longer in feed XML.
     media_exts = {
@@ -279,6 +285,8 @@ def _collect_podsync_downloads() -> dict[str, dict]:
         if media_file.suffix.lower() not in media_exts:
             continue
         video_id = _extract_video_id(media_file.name)
+        if not video_id:
+            video_id = podsync_filename_video_id_hints.get(media_file.name, "")
         if not video_id or video_id in found:
             continue
         found[video_id] = {

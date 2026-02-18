@@ -17,6 +17,7 @@ from sqlalchemy import select
 from .config import settings
 from .database import SessionLocal
 from .models import Channel, Download, Job, Video
+from .video_id import extract_video_id
 from .ytdlp import download_video, get_video_metadata, index_channel
 
 logger = logging.getLogger("uvicorn.error")
@@ -82,24 +83,15 @@ def _find_child_text(item: ET.Element, local_name: str) -> str:
     return ""
 
 
-def _extract_video_id(value: str) -> str:
-    text = (value or "").strip()
-    if not text:
-        return ""
-
-    match = re.search(r"[?&]v=([A-Za-z0-9_-]{6,20})", text)
-    if match:
-        return match.group(1)
-
-    match = re.search(r"youtu\.be/([A-Za-z0-9_-]{6,20})", text)
-    if match:
-        return match.group(1)
-
-    match = re.fullmatch(r"[A-Za-z0-9_-]{6,20}", text)
-    if match:
-        return text
-
+def _find_enclosure_url(item: ET.Element) -> str:
+    for child in item:
+        if _local_name(child.tag) == "enclosure":
+            return (child.attrib.get("url") or "").strip()
     return ""
+
+
+def _extract_video_id(value: str) -> str:
+    return extract_video_id(value)
 
 
 def _extract_episode_number(value: str) -> int | None:
@@ -223,7 +215,13 @@ def _load_podsync_feeds() -> list[PodsyncFeed]:
             pub_dt = _parse_pub_date(_find_child_text(item, "pubDate")) or datetime.utcnow()
             desc_text = _find_child_text(item, "description")
             xml = "    " + ET.tostring(item, encoding="unicode").replace("\n", "\n    ")
-            dedupe_key = _extract_video_id(guid) or _extract_video_id(_find_child_text(item, "link")) or guid
+            dedupe_key = (
+                _extract_video_id(guid)
+                or _extract_video_id(_find_child_text(item, "link"))
+                or _extract_video_id(_find_enclosure_url(item))
+                or _extract_video_id(xml)
+                or guid
+            )
             items.append(
                 FeedItem(
                     guid=guid,
