@@ -390,12 +390,42 @@ def _manual_feed_items(rows: list[tuple[Download, Video]]) -> list[FeedItem]:
 def regenerate_manual_feed() -> None:
     rows = _load_manual_rows()
     items = _manual_feed_items(rows)
+    image_url = settings.manual_feed_image_url.strip()
+
+    if not image_url:
+        podsync_feeds = _load_podsync_feeds()
+        by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
+        by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
+
+        channels_by_id: dict[int, Channel] = {}
+        with SessionLocal() as session:
+            channels = session.execute(select(Channel).order_by(Channel.id.asc())).scalars().all()
+            channels_by_id = {channel.id: channel for channel in channels}
+
+        for _download, video in rows:
+            channel = channels_by_id.get(video.channel_id)
+            if not channel:
+                continue
+            podsync_feed = by_source_url.get(_normalize_url(channel.url))
+            if podsync_feed is None and channel.name:
+                podsync_feed = by_feed_id.get(channel.name)
+            if podsync_feed and podsync_feed.image_url:
+                image_url = podsync_feed.image_url
+                break
+
+        if not image_url:
+            for feed in podsync_feeds:
+                if feed.image_url:
+                    image_url = feed.image_url
+                    break
+
     _write_feed_file(
         settings.manual_feed_file,
         settings.manual_feed_title,
         settings.manual_feed_description,
         settings.public_base_url.rstrip("/") + settings.manual_feed_path,
         items,
+        image_url,
     )
 
 

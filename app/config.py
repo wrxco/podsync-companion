@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     manual_feed_file: str = "/data/manual.xml"
     manual_feed_title: str = "Podsync Companion Manual Feed"
     manual_feed_description: str = "Manually selected back-catalog episodes"
+    manual_feed_image_url: str = ""
 
     # Per-channel merged feeds live at /feeds/merged/<channel_id>.xml
     merged_feed_path_prefix: str = "/feeds/merged"
