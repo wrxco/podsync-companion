@@ -29,6 +29,7 @@ services:
       - COMPANION_MANUAL_FEED_FILE=/data/manual.xml
       - COMPANION_MANUAL_FEED_TITLE=Podsync Companion Manual Feed
       - COMPANION_MANUAL_FEED_DESCRIPTION=Manually selected back-catalog episodes
+      - COMPANION_MANUAL_FEED_IMAGE_URL=
       - COMPANION_MERGED_FEED_PATH_PREFIX=/feeds/merged
       - COMPANION_MERGED_FEED_DIR=/data/merged
       - COMPANION_MERGED_FEED_TITLE_SUFFIX=Merged Feed
