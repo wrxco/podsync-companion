@@ -38,6 +38,7 @@ class PodsyncFeed:
     source_url: str
     title: str
     description: str
+    image_url: str
     items: list[FeedItem]
 
 
@@ -136,8 +137,27 @@ def _format_pub_date(dt: datetime) -> str:
     return format_datetime(dt)
 
 
-def _write_feed_file(path: str, title: str, description: str, link: str, items: list[FeedItem]) -> None:
+def _write_feed_file(
+    path: str,
+    title: str,
+    description: str,
+    link: str,
+    items: list[FeedItem],
+    image_url: str = "",
+) -> None:
     now = datetime.utcnow()
+    image_lines: list[str] = []
+    if image_url:
+        safe_image_url = escape(image_url)
+        image_lines = [
+            "    <image>",
+            f"      <url>{safe_image_url}</url>",
+            f"      <title>{escape(title)}</title>",
+            f"      <link>{escape(link)}</link>",
+            "    </image>",
+            f"    <itunes:image href=\"{safe_image_url}\" />",
+        ]
+
     xml = "\n".join(
         [
             '<?xml version="1.0" encoding="UTF-8"?>',
@@ -146,6 +166,7 @@ def _write_feed_file(path: str, title: str, description: str, link: str, items: 
             f"    <title>{escape(title)}</title>",
             f"    <description>{escape(description)}</description>",
             f"    <link>{escape(link)}</link>",
+            *image_lines,
             f"    <lastBuildDate>{_format_pub_date(now)}</lastBuildDate>",
             *[item.xml for item in items],
             "  </channel>",
@@ -182,6 +203,13 @@ def _load_podsync_feeds() -> list[PodsyncFeed]:
         source_url = _normalize_url(_find_child_text(channel, "link"))
         title = _find_child_text(channel, "title") or feed_id
         description = _find_child_text(channel, "description")
+        image_url = ""
+        for child in channel:
+            if _local_name(child.tag) != "image":
+                continue
+            image_url = (child.attrib.get("href") or "").strip() or _find_child_text(child, "url").strip()
+            if image_url:
+                break
 
         items: list[FeedItem] = []
         for item in channel:
@@ -207,7 +235,16 @@ def _load_podsync_feeds() -> list[PodsyncFeed]:
                 )
             )
 
-        feeds.append(PodsyncFeed(feed_id=feed_id, source_url=source_url, title=title, description=description, items=items))
+        feeds.append(
+            PodsyncFeed(
+                feed_id=feed_id,
+                source_url=source_url,
+                title=title,
+                description=description,
+                image_url=image_url,
+                items=items,
+            )
+        )
 
     return feeds
 
@@ -423,6 +460,7 @@ def regenerate_merged_feeds() -> None:
             description,
             link,
             merged_items,
+            podsync_feed.image_url if podsync_feed else "",
         )
         generated_channel_ids.add(channel.id)
 
