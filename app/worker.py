@@ -283,10 +283,50 @@ def sync_channels_from_podsync_config() -> int:
     return added
 
 
-def _match_channel_podsync_feed(channel: Channel, by_source_url: dict[str, PodsyncFeed], by_feed_id: dict[str, PodsyncFeed]) -> PodsyncFeed | None:
+def _load_podsync_feed_config_urls() -> dict[str, str]:
+    config_path = Path(settings.podsync_config_path)
+    if not config_path.exists():
+        return {}
+
+    try:
+        raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    feeds = raw.get("feeds")
+    if not isinstance(feeds, dict):
+        return {}
+
+    mapping: dict[str, str] = {}
+    for feed_id, feed_cfg in feeds.items():
+        if not isinstance(feed_cfg, dict):
+            continue
+        url = _normalize_url(str(feed_cfg.get("url") or ""))
+        if not url:
+            continue
+        mapping[str(feed_id)] = url
+    return mapping
+
+
+def _match_channel_podsync_feed(
+    channel: Channel,
+    by_source_url: dict[str, PodsyncFeed],
+    by_feed_id: dict[str, PodsyncFeed],
+    by_config_source_url: dict[str, str],
+) -> PodsyncFeed | None:
     feed = by_source_url.get(_normalize_url(channel.url))
+    if feed is None:
+        config_feed_id = by_config_source_url.get(_normalize_url(channel.url))
+        if config_feed_id:
+            feed = by_feed_id.get(config_feed_id)
     if feed is None and channel.name:
         feed = by_feed_id.get(channel.name)
+    if feed is None and channel.name:
+        lowered = channel.name.strip().lower()
+        for feed_id, candidate in by_feed_id.items():
+            if feed_id.strip().lower() == lowered:
+                feed = candidate
+                break
     return feed
 
 
@@ -297,6 +337,8 @@ def sync_videos_from_podsync_feeds() -> int:
 
     by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
     by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
+    config_urls_by_feed_id = _load_podsync_feed_config_urls()
+    by_config_source_url = {url: feed_id for feed_id, url in config_urls_by_feed_id.items()}
     added = 0
 
     with SessionLocal() as session:
@@ -304,7 +346,7 @@ def sync_videos_from_podsync_feeds() -> int:
         now = datetime.utcnow()
 
         for channel in channels:
-            podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id)
+            podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id, by_config_source_url)
             if podsync_feed is None:
                 continue
 
@@ -356,8 +398,7 @@ def sync_videos_from_podsync_feeds() -> int:
         if added > 0:
             session.commit()
 
-    if added > 0:
-        logger.info("podsync video sync added %s new indexed videos", added)
+    logger.info("podsync video sync completed: added=%s", added)
     return added
 
 
@@ -472,6 +513,8 @@ def regenerate_manual_feed() -> None:
         podsync_feeds = _load_podsync_feeds()
         by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
         by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
+        config_urls_by_feed_id = _load_podsync_feed_config_urls()
+        by_config_source_url = {url: feed_id for feed_id, url in config_urls_by_feed_id.items()}
 
         channels_by_id: dict[int, Channel] = {}
         with SessionLocal() as session:
@@ -482,9 +525,7 @@ def regenerate_manual_feed() -> None:
             channel = channels_by_id.get(video.channel_id)
             if not channel:
                 continue
-            podsync_feed = by_source_url.get(_normalize_url(channel.url))
-            if podsync_feed is None and channel.name:
-                podsync_feed = by_feed_id.get(channel.name)
+            podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id, by_config_source_url)
             if podsync_feed and podsync_feed.image_url:
                 image_url = podsync_feed.image_url
                 break
@@ -509,6 +550,8 @@ def regenerate_merged_feeds() -> None:
     podsync_feeds = _load_podsync_feeds()
     by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
     by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
+    config_urls_by_feed_id = _load_podsync_feed_config_urls()
+    by_config_source_url = {url: feed_id for feed_id, url in config_urls_by_feed_id.items()}
 
     manual_rows = _load_manual_rows()
     manual_by_channel: dict[int, list[tuple[Download, Video]]] = {}
@@ -523,7 +566,7 @@ def regenerate_merged_feeds() -> None:
     generated_channel_ids: set[int] = set()
 
     for channel in channels:
-        podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id)
+        podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id, by_config_source_url)
 
         podsync_items = podsync_feed.items if podsync_feed else []
         manual_items = _manual_feed_items(manual_by_channel.get(channel.id, []))
