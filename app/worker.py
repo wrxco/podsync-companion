@@ -283,6 +283,84 @@ def sync_channels_from_podsync_config() -> int:
     return added
 
 
+def _match_channel_podsync_feed(channel: Channel, by_source_url: dict[str, PodsyncFeed], by_feed_id: dict[str, PodsyncFeed]) -> PodsyncFeed | None:
+    feed = by_source_url.get(_normalize_url(channel.url))
+    if feed is None and channel.name:
+        feed = by_feed_id.get(channel.name)
+    return feed
+
+
+def sync_videos_from_podsync_feeds() -> int:
+    podsync_feeds = _load_podsync_feeds()
+    if not podsync_feeds:
+        return 0
+
+    by_source_url = {_normalize_url(feed.source_url): feed for feed in podsync_feeds if feed.source_url}
+    by_feed_id = {feed.feed_id: feed for feed in podsync_feeds}
+    added = 0
+
+    with SessionLocal() as session:
+        channels = session.execute(select(Channel).order_by(Channel.id.asc())).scalars().all()
+        now = datetime.utcnow()
+
+        for channel in channels:
+            podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id)
+            if podsync_feed is None:
+                continue
+
+            channel_added = 0
+            for item in podsync_feed.items:
+                video_id = _extract_video_id(item.dedupe_key) or _extract_video_id(item.guid)
+                if not video_id:
+                    continue
+
+                existing = session.execute(
+                    select(Video).where(Video.channel_id == channel.id, Video.video_id == video_id)
+                ).scalar_one_or_none()
+                if existing is not None:
+                    continue
+
+                title = ""
+                description = ""
+                webpage_url = ""
+                try:
+                    item_node = ET.fromstring(item.xml.strip())
+                    title = _find_child_text(item_node, "title")
+                    description = _find_child_text(item_node, "description")
+                    webpage_url = _find_child_text(item_node, "link")
+                except Exception:
+                    pass
+
+                if not webpage_url:
+                    webpage_url = f"https://youtube.com/watch?v={video_id}"
+
+                session.add(
+                    Video(
+                        channel_id=channel.id,
+                        video_id=video_id,
+                        title=title,
+                        description=description,
+                        webpage_url=webpage_url,
+                        published_at=item.pub_date,
+                        duration_seconds=None,
+                        thumbnail_url="",
+                        uploader="",
+                    )
+                )
+                added += 1
+                channel_added += 1
+
+            if channel_added > 0:
+                channel.last_indexed_at = now
+
+        if added > 0:
+            session.commit()
+
+    if added > 0:
+        logger.info("podsync video sync added %s new indexed videos", added)
+    return added
+
+
 def ensure_video_metadata(video: Video) -> None:
     metadata = get_video_metadata(video.webpage_url)
     if metadata["title"]:
@@ -445,9 +523,7 @@ def regenerate_merged_feeds() -> None:
     generated_channel_ids: set[int] = set()
 
     for channel in channels:
-        podsync_feed = by_source_url.get(_normalize_url(channel.url))
-        if podsync_feed is None and channel.name:
-            podsync_feed = by_feed_id.get(channel.name)
+        podsync_feed = _match_channel_podsync_feed(channel, by_source_url, by_feed_id)
 
         podsync_items = podsync_feed.items if podsync_feed else []
         manual_items = _manual_feed_items(manual_by_channel.get(channel.id, []))
@@ -631,6 +707,7 @@ def process_next_job() -> None:
                 regenerate_all_feeds()
             elif job.job_type == "sync_podsync_feeds":
                 sync_channels_from_podsync_config()
+                sync_videos_from_podsync_feeds()
                 regenerate_merged_feeds()
             else:
                 raise RuntimeError(f"unknown job type {job.job_type}")
@@ -676,6 +753,7 @@ def worker_loop(stop_event: threading.Event) -> None:
         if settings.podsync_feed_sync_interval_seconds > 0 and datetime.utcnow() >= next_feed_sync_at:
             try:
                 sync_channels_from_podsync_config()
+                sync_videos_from_podsync_feeds()
                 regenerate_merged_feeds()
             except Exception:
                 logger.exception("worker loop failed during periodic podsync feed sync")

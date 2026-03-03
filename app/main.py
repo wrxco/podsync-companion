@@ -19,7 +19,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine
 from .models import Channel, Download, Job, Video
 from .schemas import ChannelCreate, ChannelOut, DownloadOut, EnqueueDownloadIn, VideoOut
-from .worker import regenerate_all_feeds, sync_channels_from_podsync_config, worker_loop
+from .worker import regenerate_all_feeds, sync_channels_from_podsync_config, sync_videos_from_podsync_feeds, worker_loop
 from .video_id import extract_video_id
 from .ytdlp import get_video_metadata
 
@@ -319,6 +319,7 @@ def on_startup() -> None:
 
     # Import channels declared in Podsync config before serving requests.
     sync_channels_from_podsync_config()
+    sync_videos_from_podsync_feeds()
     regenerate_all_feeds()
 
     stop_event.clear()
@@ -377,6 +378,7 @@ def create_channel(payload: ChannelCreate, db: Session = Depends(get_db)):
 @app.post("/api/channels/sync_from_podsync")
 def sync_channels_from_podsync():
     added = sync_channels_from_podsync_config()
+    sync_videos_from_podsync_feeds()
     regenerate_all_feeds()
     return {"ok": True, "added": added}
 
