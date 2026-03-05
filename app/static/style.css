@@ -79,6 +79,10 @@ button {
   cursor: pointer;
 }
 
+button.danger {
+  background: #c62828;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

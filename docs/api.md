@@ -70,6 +70,28 @@ Response JSON:
 Errors:
 - `404` if channel not found
 
+### `DELETE /api/channels/{channel_id}`
+
+Delete a channel from companion state, including its indexed video catalog and explicit download records.
+
+Query params:
+- `delete_media` (bool, default `false`) if `true`, also delete explicit media files under `COMPANION_MEDIA_DIR` for this channel's downloads
+
+Response JSON:
+- `ok` (bool)
+- `channel_id` (int)
+- `videos_deleted` (int)
+- `downloads_deleted` (int)
+- `jobs_deleted` (int) queued/running jobs removed for this channel or its videos
+- `media_deleted` (int) number of explicit media files deleted from disk
+
+Errors:
+- `404` if channel not found
+
+Notes:
+- This removes companion-managed catalog state only.
+- If the same channel remains in Podsync config, using `POST /api/channels/sync_from_podsync` can re-import it.
+
 ### `GET /api/videos`
 
 List indexed videos with filtering, search, sorting, and pagination.
@@ -161,4 +183,3 @@ Response item:
 - `GET /` web UI
 - `GET {COMPANION_MANUAL_FEED_PATH}` explicit feed XML
 - `GET {COMPANION_MERGED_FEED_PATH_PREFIX}/{channel_id}.xml` merged feed XML
-

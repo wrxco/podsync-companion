@@ -404,6 +404,32 @@ async function loadChannels() {
     };
     header.appendChild(btn);
 
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete channel";
+    deleteBtn.type = "button";
+    deleteBtn.className = "danger";
+    deleteBtn.onclick = async () => {
+      const channelName = ch.name || ch.url;
+      const confirmed = window.confirm(
+        `Delete channel "${channelName}" from Companion?\n\nThis removes its indexed videos and explicit download records.`
+      );
+      if (!confirmed) return;
+
+      const deleteMedia = window.confirm(
+        "Also delete explicit media files for this channel from Companion's media directory?"
+      );
+      const result = await api(`/api/channels/${ch.id}?delete_media=${deleteMedia ? "true" : "false"}`, {
+        method: "DELETE",
+      });
+
+      alert(
+        `Deleted channel ${result.channel_id}. Videos: ${result.videos_deleted}, downloads: ${result.downloads_deleted}, jobs: ${result.jobs_deleted}, media files deleted: ${result.media_deleted}.`
+      );
+      await refreshDownloadStatuses();
+      await loadChannels();
+    };
+    header.appendChild(deleteBtn);
+
     const name = ch.name || ch.url;
     const meta = document.createElement("span");
     meta.textContent = `${name} (${formatIndexStatus(ch)})`;

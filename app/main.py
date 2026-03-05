@@ -375,6 +375,86 @@ def create_channel(payload: ChannelCreate, db: Session = Depends(get_db)):
     return channel
 
 
+@app.delete("/api/channels/{channel_id}")
+def delete_channel(channel_id: int, delete_media: bool = False, db: Session = Depends(get_db)):
+    channel = db.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    videos = db.execute(select(Video).where(Video.channel_id == channel_id)).scalars().all()
+    videos_deleted = len(videos)
+    video_ids = {str(v.video_id) for v in videos}
+
+    downloads = (
+        db.execute(
+            select(Download)
+            .join(Video, Video.video_id == Download.video_id)
+            .where(Video.channel_id == channel_id)
+        )
+        .scalars()
+        .all()
+    )
+    downloads_deleted = len(downloads)
+
+    media_deleted = 0
+    media_root = Path(settings.media_dir).resolve()
+    if delete_media:
+        for download in downloads:
+            if not download.media_path:
+                continue
+
+            try:
+                media_path = Path(download.media_path).resolve()
+            except OSError:
+                continue
+
+            if media_path != media_root and media_root not in media_path.parents:
+                continue
+
+            try:
+                if media_path.is_file():
+                    media_path.unlink()
+                    media_deleted += 1
+            except OSError:
+                continue
+
+    for download in downloads:
+        db.delete(download)
+
+    jobs_deleted = 0
+    for job in db.execute(select(Job)).scalars().all():
+        payload = job.payload or {}
+        if not isinstance(payload, dict):
+            continue
+
+        delete_job = False
+        if job.job_type == "index_channel":
+            delete_job = str(payload.get("channel_id")) == str(channel_id)
+        elif job.job_type == "download_video":
+            delete_job = str(payload.get("video_id")) in video_ids
+
+        if delete_job:
+            db.delete(job)
+            jobs_deleted += 1
+
+    for video in videos:
+        db.delete(video)
+    db.delete(channel)
+    db.commit()
+
+    (Path(settings.merged_feed_dir) / f"{channel_id}.xml").unlink(missing_ok=True)
+    regenerate_all_feeds()
+
+    return {
+        "ok": True,
+        "channel_id": channel_id,
+        "videos_deleted": videos_deleted,
+        "downloads_deleted": downloads_deleted,
+        "jobs_deleted": jobs_deleted,
+        "media_deleted": media_deleted,
+    }
+
+
 @app.post("/api/channels/sync_from_podsync")
 def sync_channels_from_podsync():
     added = sync_channels_from_podsync_config()
